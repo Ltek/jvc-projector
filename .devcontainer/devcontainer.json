@@ -4,8 +4,14 @@
   "workspaceFolder": "/workspace",
 
   "mounts": [
-    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+    "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "source=jvc-projector-ha_ha-config,target=/config,type=volume"
   ],
+
+  "appPort": ["8123:8123"],
+
+  "overrideCommand": false,
+  "runArgs": ["--entrypoint", "/workspace/.devcontainer/start.sh"],
 
   "customizations": {
     "vscode": {
@@ -27,11 +33,10 @@
         "[python]": {
           "editor.defaultFormatter": "charliermarsh.ruff",
           "editor.formatOnSave": true
+        }
       }
     }
   },
 
-  "postCreateCommand": "/usr/local/bin/python3 -m pip install --upgrade pip && /usr/local/bin/python3 -m pip install homeassistant pytest pytest-cov ruff",
-
-  "remoteUser": "root"
+  "postStartCommand": ""
 }
