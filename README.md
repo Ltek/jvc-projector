@@ -2,9 +2,9 @@
 
 A Home Assistant integration for JVC D-ILA projectors using the [**2024 External Command Communication Specification**](https://www.jvc.com/usa/projectors/installers-calibrators/external-command-communication-specification/) over the network.
 
-Current build: **v2026.10.13.1** · full history in [CHANGELOG.md](CHANGELOG.md)
+Current build: **v2026.10.13.2** · full history in [CHANGELOG.md](CHANGELOG.md)
 
-This is the Ltek version of [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha). It keeps the same integration domain (`jvc_projector_ha`), so it replaces the original in place. The [JVC Projector Card](https://github.com/Ltek/jvc-projector-card) is the matching Dashboard card.
+This is the Ltek version of [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha). It keeps the same integration domain (`jvc_projector_ha`), so it replaces the original in place. The [JVC Projector Card](https://github.com/Ltek/jvc-projector-card) is the matching Dashboard card (lens memory, anamorphic, HDR and low-latency rows in its Picture section).
 
 ## Supported Models
 
@@ -32,6 +32,11 @@ The [**2025 specification**](https://www.jvc.com/usa/projectors/installers-calib
 | Picture Mode | Cinema, Natural, HDR, FILMMAKER MODE… — only the modes valid for the current content type are offered |
 | Dynamic Control | Off / Low / High / Balanced |
 | LD Power | Laser power, 1–100 |
+| Installation Mode | Lens memory: Memory 1–10 (1–5 on the NZ500 / NZ700 family). The command answers once the lens has finished moving. |
+| Anamorphic | Off / A / B / C / D |
+| HDR Processing | Static / Frame by Frame / Scene by Scene. Shows HDR10+ when the projector uses it for HDR10+ content (it can't be selected). Available only while the source is HDR. |
+| HDR Level | Auto / −2 … +2 / Auto (Wide). Available only while the source is HDR. |
+| Low Latency | On / off. The projector refuses it while some picture settings are active (you get an error). |
 
 **Sensors** (diagnostic)
 
@@ -151,7 +156,7 @@ If your projector only has a wired network connection, a travel router such as t
 
 ## Polling
 
-Every 10 s the integration reads power, input and signal, and (while on) picture mode, dynamic control, laser power, source resolution and content type. Light-source hours, colorimetry and input display are read once a minute and whenever power, input or signal changes. With no signal, the signal-only queries are skipped. A query that keeps failing (for example a command your model doesn't support) is logged once and then retried only once a minute.
+Every 10 s the integration reads power, input and signal, and (while on) picture mode, dynamic control, laser power, source resolution and content type. Light-source hours, colorimetry, input display, installation mode, anamorphic, low latency and the HDR settings are read once a minute and whenever power, input, signal, picture mode or content type changes. A value you set from Home Assistant shows immediately. With no signal, the signal-only queries are skipped. A query that keeps failing (for example a command your model doesn't support) is logged once and then retried only once a minute.
 
 ---
 

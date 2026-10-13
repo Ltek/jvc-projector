@@ -34,6 +34,7 @@ PLATFORMS = [
     Platform.REMOTE,
     Platform.SELECT,
     Platform.SENSOR,
+    Platform.SWITCH,
 ]
 
 SETUP_TIMEOUT = 30  # seconds

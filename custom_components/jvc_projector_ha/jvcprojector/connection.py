@@ -51,10 +51,12 @@ class JvcConnection:
         except asyncio.IncompleteReadError as err:
             raise JvcProjectorConnectError("Connection closed by projector") from err
 
-    async def readline(self) -> bytes:
+    async def readline(self, timeout: float | None = None) -> bytes:
         """Read all bytes up to newline from device (raises on EOF)."""
         assert self._reader
-        data = await asyncio.wait_for(self._reader.readline(), timeout=self._timeout)
+        data = await asyncio.wait_for(
+            self._reader.readline(), timeout=timeout or self._timeout
+        )
         if not data:
             raise JvcProjectorConnectError("Connection closed by projector")
         return data

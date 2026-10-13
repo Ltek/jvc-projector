@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 
@@ -27,6 +28,14 @@ class JVCSelectEntityDescription(SelectEntityDescription):
     # Option -> parameter sent after command_code. Must match the reverse map in
     # jvcprojector/command.py (checked by tests/test_tables.py).
     code_map: dict[str, str] = field(default_factory=dict)
+    # Options that can be shown but not set (e.g. HDR processing "HDR10+").
+    read_only: frozenset[str] = frozenset()
+    # Only available while the source is HDR (HDR10, HDR10+, HLG).
+    requires_hdr: bool = False
+    # Read timeout for the set command (None = default).
+    op_timeout: float | None = None
+    # Narrows the options for a model code (MD), e.g. 5 lens memories on NZ500.
+    options_fn: Callable[[str | None], list[str]] | None = None
 
 
 # Picture Mode mapping from internal values to command codes (Table 3-19)
@@ -54,6 +63,40 @@ DYNAMIC_CTRL_TO_CODE = {
     "low": "1",
     "high": "2",
     "balanced": "3",
+}
+
+# Installation mode (lens memory) — Installation Mode 1-10 ("0"-"9")
+INSTALLATION_MODE_TO_CODE = {f"memory_{i}": f"{i - 1:X}" for i in range(1, 11)}
+
+# Models with only five installation modes (NZ500 / NZ700 family, spec CS20242)
+FIVE_MEMORY_MODELS = ("D8A1", "D8A2")
+
+
+def installation_mode_options(model: str | None) -> list[str]:
+    """Return the lens memories this model has."""
+    options = list(INSTALLATION_MODE_TO_CODE)
+    if model and model.strip().endswith(FIVE_MEMORY_MODELS):
+        return options[:5]
+    return options
+
+
+ANAMORPHIC_TO_CODE = {"off": "0", "a": "1", "b": "2", "c": "3", "d": "4"}
+
+HDR_PROCESSING_TO_CODE = {
+    "hdr10_plus": "0",
+    "static": "1",
+    "frame_by_frame": "2",
+    "scene_by_scene": "3",
+}
+
+HDR_LEVEL_TO_CODE = {
+    "auto": "0",
+    "minus_2": "1",
+    "minus_1": "2",
+    "zero": "3",
+    "plus_1": "4",
+    "plus_2": "5",
+    "auto_wide": "6",
 }
 
 # Picture modes available per content type (from NZ500 manual)
@@ -89,6 +132,44 @@ JVC_SELECTS: tuple[JVCSelectEntityDescription, ...] = (
         options=list(DYNAMIC_CTRL_TO_CODE),
         entity_category=EntityCategory.CONFIG,
     ),
+    JVCSelectEntityDescription(
+        key=const.INML,
+        translation_key="jvc_installation_mode",
+        command_code=command.INML,
+        code_map=INSTALLATION_MODE_TO_CODE,
+        options=list(INSTALLATION_MODE_TO_CODE),
+        options_fn=installation_mode_options,
+        # The projector answers only once the lens has finished moving.
+        op_timeout=30,
+        entity_category=EntityCategory.CONFIG,
+    ),
+    JVCSelectEntityDescription(
+        key=const.INVS,
+        translation_key="jvc_anamorphic",
+        command_code=command.INVS,
+        code_map=ANAMORPHIC_TO_CODE,
+        options=list(ANAMORPHIC_TO_CODE),
+        entity_category=EntityCategory.CONFIG,
+    ),
+    JVCSelectEntityDescription(
+        key=const.PMHP,
+        translation_key="jvc_hdr_processing",
+        command_code=command.PMHP,
+        code_map=HDR_PROCESSING_TO_CODE,
+        options=list(HDR_PROCESSING_TO_CODE),
+        read_only=frozenset({"hdr10_plus"}),
+        requires_hdr=True,
+        entity_category=EntityCategory.CONFIG,
+    ),
+    JVCSelectEntityDescription(
+        key=const.PMHL,
+        translation_key="jvc_hdr_level",
+        command_code=command.PMHL,
+        code_map=HDR_LEVEL_TO_CODE,
+        options=list(HDR_LEVEL_TO_CODE),
+        requires_hdr=True,
+        entity_category=EntityCategory.CONFIG,
+    ),
 )
 
 
@@ -121,6 +202,16 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
         self._attr_unique_id = f"{coordinator.unique_id}_{description.key}"
 
     @property
+    def available(self) -> bool:
+        """Return if entity is available (HDR settings need an HDR source)."""
+        if not super().available:
+            return False
+        if self.entity_description.requires_hdr:
+            content = self.coordinator.data.get(const.auto_content_type)
+            return content in const.HDR_CONTENT
+        return True
+
+    @property
     def current_option(self) -> str | None:
         """Return the current selected option."""
         value = self.coordinator.data.get(self.entity_description.key)
@@ -137,8 +228,11 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
 
         Picture modes are filtered to those valid for the current content type.
         """
-        options = list(self.entity_description.code_map)
-        if self.entity_description.key != const.PMPM:
+        description = self.entity_description
+        if description.options_fn is not None:
+            return description.options_fn(self.coordinator.data.get(const.MODEL))
+        options = list(description.code_map)
+        if description.key != const.PMPM:
             return options
         content_type = self.coordinator.data.get(const.auto_content_type)
         filtered = CONTENT_TYPE_PICTURE_MODES.get(content_type or "")
@@ -152,15 +246,23 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
-        code = self.entity_description.code_map.get(option)
-        if code is None:
+        description = self.entity_description
+        code = description.code_map.get(option)
+        if code is None or option not in self.options:
             raise ServiceValidationError(
-                f"'{option}' is not a valid option for {self.entity_description.key}"
+                f"'{option}' is not a valid option for {description.key}"
+            )
+        if option in description.read_only:
+            raise ServiceValidationError(
+                f"'{option}' is set by the projector and can't be selected"
             )
         full_command = f"{self.entity_description.command_code}{code}"
         _LOGGER.debug(
             "Setting %s to %s (%s)", self.entity_description.key, option, full_command
         )
         label = self.name if isinstance(self.name, str) else self.entity_description.key
-        await self._run(f"Setting {label} to {option}", self.device.op(full_command))
+        await self._run(
+            f"Setting {label} to {option}",
+            self.device.op(full_command, timeout=description.op_timeout),
+        )
         self.coordinator.set_optimistic(**{self.entity_description.key: option})

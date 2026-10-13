@@ -50,6 +50,7 @@ class Query:
     key: str
     code: str
     needs_signal: bool = False
+    needs_hdr: bool = False
     slow: bool = False
     numeric: bool = False
 
@@ -64,6 +65,13 @@ QUERIES: tuple[Query, ...] = (
     Query(const.IFCM, command.IFCM, needs_signal=True, slow=True),
     Query(const.IFIN, command.IFIN, slow=True),
     Query(const.IFLT, command.IFLT, slow=True, numeric=True),
+    # Installation / picture settings: they change only when someone changes
+    # them (set from HA, they update at once), so the slow schedule is enough.
+    Query(const.INML, command.INML, slow=True),
+    Query(const.INVS, command.INVS, slow=True),
+    Query(const.PMLL, command.PMLL, slow=True),
+    Query(const.PMHP, command.PMHP, needs_signal=True, needs_hdr=True, slow=True),
+    Query(const.PMHL, command.PMHL, needs_signal=True, needs_hdr=True, slow=True),
 )
 
 # Values kept while the projector is off (they don't change in standby).
@@ -89,6 +97,7 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.unique_id = format_mac(device.mac)
 
         self._poll_count = 0
+        self._force_slow = False
         self._last_base: tuple[Any, ...] | None = None
         # Consecutive failures per query key, and keys already warned about.
         self._failures: dict[str, int] = {}
@@ -129,8 +138,12 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         power = result.get(const.POWER)
         base = (power, result.get(const.INPUT), result.get(const.SOURCE))
         slow_due = (
-            self._poll_count % SLOW_EVERY == 0 or base != self._last_base or not prev
+            self._poll_count % SLOW_EVERY == 0
+            or base != self._last_base
+            or not prev
+            or self._force_slow
         )
+        self._force_slow = False
         self._poll_count += 1
         self._last_base = base
 
@@ -144,12 +157,22 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for query in self.queries():
             if query.needs_signal and not has_signal:
                 continue
+            if (
+                query.needs_hdr
+                and result.get(const.auto_content_type) not in const.HDR_CONTENT
+            ):
+                continue
             unsupported = self._failures.get(query.key, 0) >= UNSUPPORTED_AFTER
             if (query.slow or unsupported) and not slow_due:
                 if query.key in prev:
                     result[query.key] = prev[query.key]
                 continue
             await self._query(result, query)
+
+        # A new picture mode or content type can change the picture settings.
+        for key in (const.PMPM, const.auto_content_type):
+            if prev.get(key) != result.get(key) and prev:
+                self._force_slow = True
 
         _LOGGER.debug("State from %s: %s", self.device.host, result)
         return result
@@ -200,4 +223,5 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Show a value the user just set, until the next poll confirms it."""
         if self.data is None:
             return
+        self._force_slow = True  # next poll re-reads everything to confirm
         self.async_set_updated_data({**self.data, **values})

@@ -4,6 +4,18 @@ Builds are numbered `YYYY.MM.DD.BUILD`. Everything before the first entry is the
 [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha) history (version 0.1.4),
 preserved in this repository's git log up to upstream commit `850aca6`.
 
+## v2026.10.13.2
+
+Phase 2: new controls from the command table.
+
+- **Installation Mode** select (lens memory, `INML`): Memory 1–10, or 1–5 on the NZ500 / NZ700 family (model `D8A1` / `D8A2`). The set command waits up to 30 s, because the projector answers only once the lens has stopped. **Not yet verified on a real projector over the network.**
+- **Anamorphic** select (`INVS`): Off / A / B / C / D.
+- **Low Latency** switch (`PMLL`).
+- **HDR Processing** select (`PMHP`): Static / Frame by Frame / Scene by Scene; shows HDR10+ (read-only) for HDR10+ content. **HDR Level** select (`PMHL`): Auto, −2 … +2, Auto (Wide). Both are available only while the source is HDR, and not queried otherwise. Codes checked against pyjvcprojector's 2024 command table.
+- These are read on the slow schedule, and re-read after a picture-mode or content-type change and after any change made from HA.
+- A command can carry its own timeout (used for the lens move).
+- Tests for all of the above (protocol, tables, end-to-end in HA).
+
 ## v2026.10.13.1
 
 First build of the Ltek version: fixes.

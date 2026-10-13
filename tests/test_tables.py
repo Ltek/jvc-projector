@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 
-from custom_components.jvc_projector_ha import select, sensor
+from custom_components.jvc_projector_ha import select, sensor, switch
 from custom_components.jvc_projector_ha.jvcprojector.command import JvcCommand
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +53,8 @@ def test_every_entity_has_a_name():
         assert EN["entity"]["sensor"][d.translation_key]["name"]
     for d in select.JVC_SELECTS:
         assert EN["entity"]["select"][d.translation_key]["name"]
+    for d in switch.JVC_SWITCHES:
+        assert EN["entity"]["switch"][d.translation_key]["name"]
 
 
 def test_state_keys_are_valid_for_hassfest():
@@ -76,6 +78,10 @@ def test_select_codes_match_command_table():
         "PMPM": "PMPM(..)",
         "PMDC": "PMDC(.)",
         "input": "(?:IP|IFIN)(.)",
+        "INML": "INML(.)",
+        "INVS": "INVS(.)",
+        "PMHP": "PMHP(.)",
+        "PMHL": "PMHL(.)",
     }
     for d in select.JVC_SELECTS:
         reverse = _formatter_reverse(patterns[d.key])
@@ -121,3 +127,10 @@ def test_version_is_consistent():
     assert f"## v{version}" in (ROOT / "CHANGELOG.md").read_text()
     assert f"**v{version}**" in (ROOT / "README.md").read_text()
     assert f'version = "{version}"' in (ROOT / "pyproject.toml").read_text()
+
+
+def test_installation_mode_options_per_model():
+    assert len(select.installation_mode_options("ILAFPJ -- D8A2")) == 5  # NZ500
+    assert len(select.installation_mode_options("ILAFPJ -- D8A1")) == 5  # NZ700
+    assert len(select.installation_mode_options("ILAFPJ -- B8A1")) == 10  # NZ900
+    assert len(select.installation_mode_options(None)) == 10

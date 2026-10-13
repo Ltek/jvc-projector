@@ -230,11 +230,12 @@ class JvcDevice:
         )
         await self._conn.write(data)
 
+        timeout = cmd.timeout or self._timeout
         try:
-            data = await self._conn.readline()
+            data = await self._conn.readline(timeout)
         except TimeoutError as err:
             raise JvcProjectorTimeoutError(
-                f"No answer to '{cmd.code}' within {self._timeout:g} s"
+                f"No answer to '{cmd.code}' within {timeout:g} s"
             ) from err
 
         _LOGGER.debug("Received ack %s", data)

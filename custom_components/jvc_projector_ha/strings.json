@@ -184,11 +184,62 @@
           "high": "High",
           "balanced": "Balanced"
         }
+      },
+      "jvc_installation_mode": {
+        "name": "Installation Mode",
+        "state": {
+          "memory_1": "Memory 1",
+          "memory_2": "Memory 2",
+          "memory_3": "Memory 3",
+          "memory_4": "Memory 4",
+          "memory_5": "Memory 5",
+          "memory_6": "Memory 6",
+          "memory_7": "Memory 7",
+          "memory_8": "Memory 8",
+          "memory_9": "Memory 9",
+          "memory_10": "Memory 10"
+        }
+      },
+      "jvc_anamorphic": {
+        "name": "Anamorphic",
+        "state": {
+          "off": "Off",
+          "a": "A",
+          "b": "B",
+          "c": "C",
+          "d": "D"
+        }
+      },
+      "jvc_hdr_processing": {
+        "name": "HDR Processing",
+        "state": {
+          "hdr10_plus": "HDR10+",
+          "static": "Static",
+          "frame_by_frame": "Frame by Frame",
+          "scene_by_scene": "Scene by Scene"
+        }
+      },
+      "jvc_hdr_level": {
+        "name": "HDR Level",
+        "state": {
+          "auto": "Auto",
+          "minus_2": "-2",
+          "minus_1": "-1",
+          "zero": "0",
+          "plus_1": "+1",
+          "plus_2": "+2",
+          "auto_wide": "Auto (Wide)"
+        }
       }
     },
     "number": {
       "jvc_ld_power": {
         "name": "LD Power"
+      }
+    },
+    "switch": {
+      "jvc_low_latency": {
+        "name": "Low Latency"
       }
     }
   }

@@ -199,3 +199,17 @@ def test_hostname_is_re_resolved_after_a_failure(monkeypatch):
         await fake.stop()
 
     run(go())
+
+
+def test_operation_timeout_override_for_lens_moves():
+    """Installation mode ACKs only after the lens stops; it gets a longer wait."""
+
+    async def go():
+        fake, pj = await _setup()
+        fake.delays["!INML"] = 0.8  # > the 0.5 s default timeout
+        await pj.op("INML2", timeout=2)
+        assert await pj.poll_ref("INML") == "memory_3"
+        await pj.disconnect()
+        await fake.stop()
+
+    run(go())

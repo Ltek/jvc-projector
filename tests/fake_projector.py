@@ -17,7 +17,7 @@ class FakeProjector:
     password: str | None = None
     # Reference code (e.g. "PW", "PMPM") -> raw reply payload (e.g. "1", "03").
     refs: dict[str, str] = field(default_factory=dict)
-    # Code prefix -> seconds to wait before answering (ACK and reply).
+    # Code prefix -> seconds to wait before answering ("!INML" = operations only).
     delays: dict[str, float] = field(default_factory=dict)
     # Code prefixes the projector never answers ("!PMLL" = operations only).
     silent: set[str] = field(default_factory=set)
@@ -79,7 +79,9 @@ class FakeProjector:
                     self.silent, kind + code
                 ):
                     continue
-                delay = self._match(self.delays, code)
+                delay = self._match(self.delays, kind + code) or self._match(
+                    self.delays, code
+                )
                 if delay:
                     await asyncio.sleep(float(delay))  # type: ignore[arg-type]
                 head = code[:2].encode()
@@ -129,6 +131,11 @@ def powered_on(**extra: str) -> dict[str, str]:
         "IFCM": "9",
         "IFIN": "6",
         "IFLT": "04D2",
+        "INML": "0",
+        "INVS": "0",
+        "PMLL": "0",
+        "PMHP": "1",
+        "PMHL": "0",
     }
     refs.update(extra)
     return refs

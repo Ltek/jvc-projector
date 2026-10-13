@@ -189,10 +189,10 @@ class JvcProjector:
         """Run remote code command."""
         await self.op(f"{command.REMOTE}{code}")
 
-    async def op(self, code: str) -> None:
+    async def op(self, code: str, timeout: float | None = None) -> None:
         """Send an operation (a user command; takes priority over polling)."""
         async with self.user_command():
-            await self._send([JvcCommand(code, False)])
+            await self._send([JvcCommand(code, False, timeout)])
 
     async def ref(self, code: str) -> str | None:
         """Send a reference (query) right away."""

@@ -93,11 +93,34 @@
       },
       "jvc_dynamic_ctrl": {
         "default": "mdi:brightness-5"
+      },
+      "jvc_installation_mode": {
+        "default": "mdi:projector-screen-variant-outline"
+      },
+      "jvc_anamorphic": {
+        "default": "mdi:aspect-ratio",
+        "state": {
+          "off": "mdi:aspect-ratio"
+        }
+      },
+      "jvc_hdr_processing": {
+        "default": "mdi:hdr"
+      },
+      "jvc_hdr_level": {
+        "default": "mdi:tune-vertical"
       }
     },
     "number": {
       "jvc_ld_power": {
         "default": "mdi:lightbulb-on"
+      }
+    },
+    "switch": {
+      "jvc_low_latency": {
+        "default": "mdi:timer-sand-off",
+        "state": {
+          "on": "mdi:speedometer"
+        }
       }
     }
   }

@@ -30,6 +30,15 @@ PMAT: Final = "PMAT"  # Auto transition value for Content Type
 PMCV: Final = "PMCV"  # LD Current Value
 PMDC: Final = "PMDC"  # Dynamic Control
 
+INML: Final = "INML"  # Installation Mode (lens memory)
+INVS: Final = "INVS"  # Anamorphic
+PMLL: Final = "PMLL"  # Low Latency
+PMHP: Final = "PMHP"  # HDR Processing
+PMHL: Final = "PMHL"  # HDR Level
+
+# Content types (PMAT) that are HDR
+HDR_CONTENT: Final = ("hdr10", "hdr10_plus", "hlg")
+
 # Internal keys (for entity IDs)
 auto_content_type: Final = "auto_content_type"  # Maps to PMAT
 

@@ -43,6 +43,11 @@ PMCT: Final = "PMCT"  # Content Type (2024 spec)
 PMAT: Final = "PMAT"  # Auto transition value for Content Type (2024 spec)
 PMCV: Final = "PMCV"  # LD Current Value (2024 spec)
 PMDC: Final = "PMDC"  # Dynamic Control (2024 spec)
+INML: Final = "INML"  # Installation Mode (lens memory)
+INVS: Final = "INVS"  # Anamorphic
+PMLL: Final = "PMLL"  # Low Latency
+PMHP: Final = "PMHP"  # HDR Processing
+PMHL: Final = "PMHL"  # HDR Level (HDR Quantizer)
 
 AUTH_SALT: Final = "JVCKWPJ"
 
@@ -50,10 +55,15 @@ AUTH_SALT: Final = "JVCKWPJ"
 class JvcCommand:
     """Class for representing a JVC Projector command."""
 
-    def __init__(self, code: str, is_ref=False):
-        """Initialize class."""
+    def __init__(self, code: str, is_ref=False, timeout: float | None = None):
+        """Initialize class.
+
+        timeout overrides the device's read timeout for this command (an
+        installation-mode change only ACKs once the lens has finished moving).
+        """
         self.code = code
         self.is_ref = is_ref
+        self.timeout = timeout
         self.ack = False
         self._response: str | None = None
 
@@ -303,6 +313,8 @@ class JvcCommand:
         "IN(?:IP|LL|SC|HA)(.)": ["off", "on"],
         # Installation - Style
         "INIS(.)": ["front", "front_ceiling", "rear", "rear_ceiling"],
+        # Installation - Installation Mode (lens memory). NZ500/NZ700 have 1-5.
+        "INML(.)": [f"memory_{i}" for i in range(1, 11)],
         # Installation - Anamorphic
         "INVS(.)": ["off", "a", "b", "c", "d"],
         # Display - Back Color
@@ -351,10 +363,23 @@ class JvcCommand:
             "3": "hybrid_log",
             "F": "none",
         },
-        # Picture Mode - HDR Level
-        "PMHL(.)": ["auto", "-2", "-1", "0", "1", "2"],
-        # Picture Mode - HDR Processing
-        "PMHP(.)": ["static", "frame", "scene"],
+        # Picture Mode - HDR Level (HDR Quantizer)
+        "PMHL(.)": {
+            "0": "auto",
+            "1": "minus_2",
+            "2": "minus_1",
+            "3": "zero",
+            "4": "plus_1",
+            "5": "plus_2",
+            "6": "auto_wide",
+        },
+        # Picture Mode - HDR Processing ("0" is read-only: HDR10+ content)
+        "PMHP(.)": {
+            "0": "hdr10_plus",
+            "1": "static",
+            "2": "frame_by_frame",
+            "3": "scene_by_scene",
+        },
         # Picture Mode - Theater Optimizer
         "PMNM(.)": ["off", "on"],
         # Picture Mode - Theater Optimizer Level

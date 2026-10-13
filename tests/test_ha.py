@@ -24,6 +24,11 @@ POWER = "sensor.jvc_projector_power_state"
 PICTURE = "select.jvc_projector_picture_mode"
 DYNAMIC = "select.jvc_projector_dynamic_control"
 LASER = "number.jvc_projector_ld_power"
+LENS = "select.jvc_projector_installation_mode"
+ANAMORPHIC = "select.jvc_projector_anamorphic"
+HDR_PROCESSING = "select.jvc_projector_hdr_processing"
+HDR_LEVEL = "select.jvc_projector_hdr_level"
+LOW_LATENCY = "switch.jvc_projector_low_latency"
 
 
 async def _add(hass: HomeAssistant, fake: FakeProjector, password: str | None = None):
@@ -270,5 +275,87 @@ def test_reconfigure_changes_address():
             await hass.async_block_till_done()
         finally:
             await other.stop()
+
+    scenario(check)
+
+
+async def _select(hass, entity_id, option):
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": entity_id, "option": option},
+        blocking=True,
+    )
+
+
+def test_lens_memory_and_anamorphic():
+    async def check(hass, fake):
+        assert _state(hass, LENS) == "memory_1"
+        # NZ500 (D8A2) has five installation modes
+        assert hass.states.get(LENS).attributes["options"] == [
+            f"memory_{i}" for i in range(1, 6)
+        ]
+        await _select(hass, LENS, "memory_3")
+        assert "INML2" in fake.codes("!")
+        assert _state(hass, LENS) == "memory_3"
+        with pytest.raises(HomeAssistantError):
+            await _select(hass, LENS, "memory_7")
+
+        assert _state(hass, ANAMORPHIC) == "off"
+        await _select(hass, ANAMORPHIC, "a")
+        assert "INVS1" in fake.codes("!")
+        await _refresh(hass)
+        assert _state(hass, ANAMORPHIC) == "a"
+        assert _state(hass, LENS) == "memory_3"
+
+    scenario(check)
+
+
+def test_low_latency_switch():
+    async def check(hass, fake):
+        assert _state(hass, LOW_LATENCY) == "off"
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": LOW_LATENCY}, blocking=True
+        )
+        assert "PMLL1" in fake.codes("!")
+        assert _state(hass, LOW_LATENCY) == "on"
+
+        fake.silent.add("!PMLL")
+        with pytest.raises(HomeAssistantError, match="did not answer"):
+            await hass.services.async_call(
+                "switch", "turn_off", {"entity_id": LOW_LATENCY}, blocking=True
+            )
+        assert _state(hass, LOW_LATENCY) == "on"
+
+    scenario(check)
+
+
+def test_hdr_settings_follow_content_type():
+    async def check(hass, fake):
+        assert _state(hass, HDR_PROCESSING) == "static"
+        assert _state(hass, HDR_LEVEL) == "auto"
+        await _select(hass, HDR_PROCESSING, "scene_by_scene")
+        assert "PMHP3" in fake.codes("!")
+        with pytest.raises(HomeAssistantError, match="can't be selected"):
+            await _select(hass, HDR_PROCESSING, "hdr10_plus")
+        await _select(hass, HDR_LEVEL, "plus_1")
+        assert "PMHL4" in fake.codes("!")
+
+        fake.refs["PMAT"] = "1"  # SDR source
+        start = len(fake.log)
+        await _refresh(hass)
+        assert _state(hass, HDR_PROCESSING) == "unavailable"
+        assert _state(hass, HDR_LEVEL) == "unavailable"
+        assert "PMHP" not in fake.codes("?")[start:]
+
+    scenario(check)
+
+
+def test_settings_unavailable_in_standby():
+    async def check(hass, fake):
+        fake.refs["PW"] = "0"
+        await _refresh(hass)
+        for entity_id in (LENS, ANAMORPHIC, LOW_LATENCY, HDR_PROCESSING):
+            assert _state(hass, entity_id) == "unavailable"
 
     scenario(check)
