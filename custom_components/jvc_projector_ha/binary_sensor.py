@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .jvcprojector import const
-
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -16,8 +14,10 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import JVCConfigEntry, JvcProjectorDataUpdateCoordinator
+from . import JVCConfigEntry
+from .coordinator import JvcProjectorDataUpdateCoordinator
 from .entity import JvcProjectorEntity
+from .jvcprojector import const
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -29,7 +29,7 @@ class JVCBinarySensorEntityDescription(BinarySensorEntityDescription):
 
 JVC_BINARY_SENSORS = (
     # Projector powered (ON or WARMING)
-    # Disabled by default - redundant with remote.jvc_projector and sensor.jvc_projector_power_state
+    # Disabled by default - redundant with the remote and the Power State sensor
     JVCBinarySensorEntityDescription(
         key=const.POWER,
         translation_key="jvc_power",
@@ -74,11 +74,13 @@ class JvcBinarySensor(JvcProjectorEntity, BinarySensorEntity):
         coordinator: JvcProjectorDataUpdateCoordinator,
         description: JVCBinarySensorEntityDescription,
     ) -> None:
+        """Initialize the binary sensor."""
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.unique_id}_{description.key}"
 
     @property
     def is_on(self) -> bool | None:
+        """Return the sensor state."""
         value = self.coordinator.data.get(self.entity_description.key)
         return self.entity_description.value_fn(value)

@@ -1,15 +1,17 @@
 {
   "domain": "jvc_projector_ha",
   "name": "JVC Projector",
-  "codeowners": ["@mjmcg"],
+  "codeowners": [
+    "@Ltek"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/mjmcg/jvc_projector_ha",
+  "documentation": "https://github.com/Ltek/jvc-projector",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/mjmcg/jvc_projector_ha/issues",
+  "issue_tracker": "https://github.com/Ltek/jvc-projector/issues",
   "loggers": [
-    "jvcprojector"
+    "custom_components.jvc_projector_ha.jvcprojector"
   ],
   "requirements": [],
-  "version": "0.1.4"
+  "version": "2026.10.13.1"
 }

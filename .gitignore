@@ -167,3 +167,7 @@ cython_debug/
 # Local reference documents (not committed)
 docs/_reference/
 jvc_logo/
+
+# Ltek dev
+.ruff_cache/
+uv.lock

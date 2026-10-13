@@ -6,11 +6,19 @@ class JvcProjectorError(Exception):
 
 
 class JvcProjectorConnectError(JvcProjectorError):
-    """Projector Connect Timeout."""
+    """Projector could not be reached (refused, unreachable, closed, DNS)."""
 
 
 class JvcProjectorCommandError(JvcProjectorError):
-    """Projector Command Error."""
+    """Projector answered with something unexpected."""
+
+
+class JvcProjectorTimeoutError(JvcProjectorCommandError):
+    """Projector did not answer a command in time.
+
+    The connection is dropped when this is raised, so a late answer can never be
+    read as the reply to the next command.
+    """
 
 
 class JvcProjectorAuthError(JvcProjectorError):

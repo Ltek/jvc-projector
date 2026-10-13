@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import timedelta
 import logging
+from typing import Any
 
-from collections.abc import Mapping
-
-from .jvcprojector.device import JvcProjectorAuthError
-from .jvcprojector.projector import JvcProjector, JvcProjectorConnectError, const
-from .jvcprojector import command  # 2024 spec
-
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.device_registry import format_mac
@@ -21,22 +18,68 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import NAME
+from .jvcprojector import command, const
+from .jvcprojector.error import (
+    JvcProjectorAuthError,
+    JvcProjectorConnectError,
+    JvcProjectorError,
+)
+from .jvcprojector.projector import JvcProjector
 
 _LOGGER = logging.getLogger(__name__)
 
-# Conservative polling interval — projectors are slow devices
+# Fast schedule: power, input, signal and the picture settings shown live.
 UPDATE_INTERVAL = timedelta(seconds=10)
 
-# Hard timeout for any single poll
-POLL_TIMEOUT = 30  # seconds
+# Slow schedule: every Nth fast poll (and whenever power, input or signal
+# changes) the rarely-changing values are read too.
+SLOW_EVERY = 6  # x 10 s = 1 minute
+
+# Upper bound for one whole poll, so a wedged projector can't stall HA.
+POLL_TIMEOUT = 45  # seconds
+
+# A query that fails this many polls in a row is retried only on the slow
+# schedule, so an unsupported command doesn't cost a timeout every 10 s.
+UNSUPPORTED_AFTER = 3
 
 
-class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, str]]):
+@dataclass(frozen=True)
+class Query:
+    """One optional status query."""
+
+    key: str
+    code: str
+    needs_signal: bool = False
+    slow: bool = False
+    numeric: bool = False
+
+
+# Queried only while the projector is on.
+QUERIES: tuple[Query, ...] = (
+    Query(const.PMPM, command.PMPM),
+    Query(const.PMDC, command.PMDC),
+    Query(const.PMCV, command.PMCV, numeric=True),
+    Query(const.IFIS, command.IFIS, needs_signal=True),
+    Query(const.auto_content_type, command.PMAT, needs_signal=True),
+    Query(const.IFCM, command.IFCM, needs_signal=True, slow=True),
+    Query(const.IFIN, command.IFIN, slow=True),
+    Query(const.IFLT, command.IFLT, slow=True, numeric=True),
+)
+
+# Values kept while the projector is off (they don't change in standby).
+KEEP_WHEN_OFF = (const.IFLT, const.MODEL)
+
+
+class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator for JVC Projector state (2024 spec)."""
 
-    def __init__(self, hass: HomeAssistant, device: JvcProjector) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, device: JvcProjector
+    ) -> None:
+        """Initialize the coordinator."""
         super().__init__(
             hass=hass,
+            config_entry=entry,
             logger=_LOGGER,
             name=NAME,
             update_interval=UPDATE_INTERVAL,
@@ -45,8 +88,11 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, str]]):
         self.device = device
         self.unique_id = format_mac(device.mac)
 
-        # Shared lock to prevent remote commands and polling from conflicting
-        self.command_lock = asyncio.Lock()
+        self._poll_count = 0
+        self._last_base: tuple[Any, ...] | None = None
+        # Consecutive failures per query key, and keys already warned about.
+        self._failures: dict[str, int] = {}
+        self._warned: set[str] = set()
 
         _LOGGER.debug(
             "Initialized JVC Projector coordinator for %s (%s)",
@@ -54,342 +100,104 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, str]]):
             self.unique_id,
         )
 
-    async def _async_update_data(self) -> Mapping[str, str | int | None]:
-        """Fetch state from the projector.
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch state from the projector."""
+        try:
+            async with asyncio.timeout(POLL_TIMEOUT):
+                return await self._poll()
+        except TimeoutError as err:
+            raise UpdateFailed("Timeout polling projector") from err
+        except JvcProjectorAuthError as err:
+            raise ConfigEntryAuthFailed("Password authentication failed") from err
+        except JvcProjectorError as err:
+            raise UpdateFailed(f"Error polling projector: {err}") from err
 
-        One connect → one poll → disconnect.
-        """
-        _LOGGER.debug("Polling state from %s", self.device.host)
+    async def _poll(self) -> dict[str, Any]:
+        """Run one poll: base state, then the optional queries."""
+        prev = self.data or {}
+        state = await self.device.get_state()
+        result: dict[str, Any] = {k: v for k, v in state.items() if v is not None}
 
-        # Use the shared lock to prevent conflicts with remote commands
-        async with self.command_lock:
-            try:
-                # Connect only for this poll
-                await asyncio.wait_for(
-                    self.device.connect(get_info=False),
-                    timeout=POLL_TIMEOUT,
-                )
+        for key in KEEP_WHEN_OFF:
+            if key in prev:
+                result[key] = prev[key]
 
-                # Base state (PW, IP, SOURCE)
-                state = await asyncio.wait_for(
-                    self.device.get_state(),
-                    timeout=POLL_TIMEOUT,
-                )
+        # Model is read once at setup (MD) and never changes.
+        if const.MODEL not in result and self.device.model_code:
+            result[const.MODEL] = self.device.model_code
 
-                # Filter out None values
-                result: dict[str, str | int] = {
-                    k: v for k, v in state.items() if v is not None
-                }
+        power = result.get(const.POWER)
+        base = (power, result.get(const.INPUT), result.get(const.SOURCE))
+        slow_due = (
+            self._poll_count % SLOW_EVERY == 0 or base != self._last_base or not prev
+        )
+        self._poll_count += 1
+        self._last_base = base
 
-                # --- Model (MD) ---
-                # Fetch once - only if not already cached (doesn't change)
-                if not self.data or not self.data.get(const.MODEL):
-                    try:
-                        raw_model = await asyncio.wait_for(
-                            self.device.ref(command.MODEL),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_model:
-                            result[const.MODEL] = raw_model
-                            _LOGGER.debug(
-                                "MD response for %s: %s",
-                                self.device.host,
-                                raw_model,
-                            )
-                    except asyncio.TimeoutError:
-                        _LOGGER.debug(
-                            "MD timeout for %s",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "MD error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
-                else:
-                    # Preserve model from previous data
-                    result[const.MODEL] = self.data[const.MODEL]
+        if power != const.ON:
+            return result
 
-                power = result.get(const.POWER)
+        has_signal = result.get(const.SOURCE) == const.SIGNAL
+        if not has_signal:
+            result[const.IFIS] = "no_signal"
 
-                # --- Light Source Time (IFLT) ---
-                # Only valid when projector is ON
-                if power == const.ON:
-                    try:
-                        raw_light_time = await asyncio.wait_for(
-                            self.device.ref(command.IFLT),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        _LOGGER.debug(
-                            "IFLT response for %s: %s (type: %s)",
-                            self.device.host,
-                            raw_light_time,
-                            type(raw_light_time).__name__,
-                        )
-                        if raw_light_time and raw_light_time.isdigit():
-                            result[const.IFLT] = int(raw_light_time)
-                        elif raw_light_time:
-                            _LOGGER.warning(
-                                "IFLT response not numeric for %s: '%s'",
-                                self.device.host,
-                                raw_light_time,
-                            )
-                    except Exception as err:
-                        _LOGGER.warning(
-                            "IFLT error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
+        for query in self.queries():
+            if query.needs_signal and not has_signal:
+                continue
+            unsupported = self._failures.get(query.key, 0) >= UNSUPPORTED_AFTER
+            if (query.slow or unsupported) and not slow_due:
+                if query.key in prev:
+                    result[query.key] = prev[query.key]
+                continue
+            await self._query(result, query)
 
-                    # --- Source Display (IFIS) ---
-                    try:
-                        raw_source_display = await asyncio.wait_for(
-                            self.device.ref(command.IFIS),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_source_display:
-                            result[const.IFIS] = raw_source_display
-                    except asyncio.TimeoutError:
-                        _LOGGER.debug(
-                            "IFIS timeout for %s",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "IFIS unavailable while on for %s: %s",
-                            self.device.host,
-                            err,
-                        )
+        _LOGGER.debug("State from %s: %s", self.device.host, result)
+        return result
 
-                    # --- Input Display (IFIN) ---
-                    try:
-                        raw_input_display = await asyncio.wait_for(
-                            self.device.ref(command.IFIN),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_input_display:
-                            result[const.IFIN] = raw_input_display
-                            _LOGGER.debug(
-                                "IFIN response for %s: %s",
-                                self.device.host,
-                                raw_input_display,
-                            )
-                    except asyncio.TimeoutError:
-                        _LOGGER.warning(
-                            "IFIN timeout for %s",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.warning(
-                            "IFIN error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
+    def queries(self) -> tuple[Query, ...]:
+        """Return the optional queries for a powered-on projector."""
+        return QUERIES
 
-                    # --- Colorimetry (IFCM) ---
-                    try:
-                        raw_colorimetry = await asyncio.wait_for(
-                            self.device.ref(command.IFCM),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_colorimetry:
-                            result[const.IFCM] = raw_colorimetry
-                            _LOGGER.debug(
-                                "IFCM response for %s: %s",
-                                self.device.host,
-                                raw_colorimetry,
-                            )
-                    except asyncio.TimeoutError:
-                        _LOGGER.debug(
-                            "IFCM timeout for %s",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "IFCM error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
-
-                    # --- Content Type (PMCT) ---
-                    # COMMENTED OUT: Not used by any sensor or control (using PMAT instead)
-                    # try:
-                    #     raw_content_type = await asyncio.wait_for(
-                    #         self.device.ref(command.PMCT),
-                    #         timeout=POLL_TIMEOUT,
-                    #     )
-                    #     if raw_content_type:
-                    #         result[const.PMCT] = raw_content_type
-                    #         _LOGGER.debug(
-                    #             "PMCT response for %s: %s",
-                    #             self.device.host,
-                    #             raw_content_type,
-                    #         )
-                    # except asyncio.TimeoutError:
-                    #     _LOGGER.warning(
-                    #         "PMCT timeout for %s - command may not be supported or projector is busy",
-                    #         self.device.host,
-                    #     )
-                    # except Exception as err:
-                    #     _LOGGER.warning(
-                    #         "PMCT error for %s: %s",
-                    #         self.device.host,
-                    #         err,
-                    #     )
-
-                    # Store content type in diagnostic key too for comparison
-                    # if const.PMCT in result:
-                    #     result[const.PMCT + "_diagnostic"] = result[const.PMCT]
-
-                    # --- Auto transition value for Content Type (PMAT) ---
-                    try:
-                        raw_auto_content_type = await asyncio.wait_for(
-                            self.device.ref(command.PMAT),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_auto_content_type:
-                            result[const.auto_content_type] = raw_auto_content_type
-                            _LOGGER.debug(
-                                "PMAT response for %s: %s",
-                                self.device.host,
-                                raw_auto_content_type,
-                            )
-                    except asyncio.TimeoutError:
-                        _LOGGER.warning(
-                            "PMAT timeout for %s - command may not be supported or projector is busy",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.warning(
-                            "PMAT error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
-
-                    # --- LD Current Value (PMCV) ---
-                    try:
-                        raw_ld_current = await asyncio.wait_for(
-                            self.device.ref(command.PMCV),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_ld_current is not None:
-                            result[const.PMCV] = raw_ld_current
-                            _LOGGER.debug(
-                                "PMCV response for %s: %s",
-                                self.device.host,
-                                raw_ld_current,
-                            )
-                    except asyncio.TimeoutError:
-                        _LOGGER.debug(
-                            "PMCV timeout for %s",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "PMCV error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
-
-                    # --- Dynamic Control (PMDC) ---
-                    try:
-                        raw_dynamic_ctrl = await asyncio.wait_for(
-                            self.device.ref(command.PMDC),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_dynamic_ctrl:
-                            result[const.PMDC] = raw_dynamic_ctrl
-                            _LOGGER.debug(
-                                "PMDC response for %s: %s",
-                                self.device.host,
-                                raw_dynamic_ctrl,
-                            )
-                    except asyncio.TimeoutError:
-                        _LOGGER.debug(
-                            "PMDC timeout for %s",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "PMDC error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
-
-                    # --- Picture Mode (PMPM) ---
-                    # Reference command: just "PMPM" per spec, projector responds with PM + 2-byte parameter
-                    try:
-                        raw_picture_mode = await asyncio.wait_for(
-                            self.device.ref(command.PMPM),
-                            timeout=POLL_TIMEOUT,
-                        )
-                        if raw_picture_mode:
-                            result[const.PMPM] = raw_picture_mode
-                            _LOGGER.debug(
-                                "PMPM response for %s: %s",
-                                self.device.host,
-                                raw_picture_mode,
-                            )
-                    except asyncio.TimeoutError:
-                        _LOGGER.warning(
-                            "PMPM timeout for %s - command may not be supported or projector is busy",
-                            self.device.host,
-                        )
-                    except Exception as err:
-                        _LOGGER.warning(
-                            "PMPM error for %s: %s",
-                            self.device.host,
-                            err,
-                        )
-                else:
-                    # Projector is off → skip IFLT poll, show power_off state
-                    result[const.IFLT] = "power_off"
-                    _LOGGER.debug(
-                        "Skipping IFLT poll for %s (power=%s)",
-                        self.device.host,
-                        power,
-                    )
-
-                _LOGGER.debug(
-                    "State from %s: power=%s input=%s signal=%s iflt=%s ifis=%s picture_mode=%s",
-                    self.device.host,
-                    result.get(const.POWER),
-                    result.get(const.INPUT),
-                    result.get(const.SOURCE),
-                    result.get(const.IFLT),
-                    result.get(const.IFIS),
-                    result.get(const.PMPM),
-                )
-
-                return result
-
-            except asyncio.TimeoutError:
-                _LOGGER.warning("Timeout polling %s", self.device.host)
-                raise UpdateFailed("Timeout polling projector")
-
-            except JvcProjectorAuthError as err:
-                _LOGGER.error("Authentication failed for %s", self.device.host)
-                raise ConfigEntryAuthFailed("Password authentication failed") from err
-
-            except JvcProjectorConnectError as err:
+    async def _query(self, result: dict[str, Any], query: Query) -> None:
+        """Run one optional query; a failure skips just that value."""
+        try:
+            value = await self.device.poll_ref(query.code)
+        except JvcProjectorConnectError:
+            raise
+        except JvcProjectorError as err:
+            count = self._failures.get(query.key, 0) + 1
+            self._failures[query.key] = count
+            # Warn once per key until it works again; the rest goes to debug.
+            if count == UNSUPPORTED_AFTER and query.key not in self._warned:
+                self._warned.add(query.key)
                 _LOGGER.warning(
-                    "Connection error polling %s: %s", self.device.host, err
-                )
-                raise UpdateFailed("Connection error polling projector") from err
-
-            except Exception as err:
-                _LOGGER.error(
-                    "Unexpected error polling %s: %s",
-                    self.device.host,
+                    "%s (%s) has failed %d polls in a row (%s); now retrying "
+                    "once a minute",
+                    query.key,
+                    query.code,
+                    count,
                     err,
-                    exc_info=True,
                 )
-                raise UpdateFailed(f"Unexpected error: {err}")
+            else:
+                _LOGGER.debug("%s (%s) failed: %s", query.key, query.code, err)
+            return
 
-            finally:
-                # Always disconnect — projector prefers short sessions
-                try:
-                    await self.device.disconnect()
-                except Exception:
-                    pass
+        if self._failures.pop(query.key, None) and query.key in self._warned:
+            self._warned.discard(query.key)
+            _LOGGER.info("%s (%s) is answering again", query.key, query.code)
+
+        if value is None or value == "":
+            return
+        if query.numeric:
+            try:
+                result[query.key] = int(value)
+            except ValueError:
+                _LOGGER.debug("%s not numeric: %r", query.key, value)
+            return
+        result[query.key] = value
+
+    def set_optimistic(self, **values: Any) -> None:
+        """Show a value the user just set, until the next poll confirms it."""
+        if self.data is None:
+            return
+        self.async_set_updated_data({**self.data, **values})

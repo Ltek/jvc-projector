@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
-
-from .jvcprojector import command, const
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import JVCConfigEntry, JvcProjectorDataUpdateCoordinator
+from . import JVCConfigEntry
+from .coordinator import JvcProjectorDataUpdateCoordinator
 from .entity import JvcProjectorEntity
+from .jvcprojector import command, const
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +24,9 @@ class JVCSelectEntityDescription(SelectEntityDescription):
     """Describe JVC select entity."""
 
     command_code: str
+    # Option -> parameter sent after command_code. Must match the reverse map in
+    # jvcprojector/command.py (checked by tests/test_tables.py).
+    code_map: dict[str, str] = field(default_factory=dict)
 
 
 # Picture Mode mapping from internal values to command codes (Table 3-19)
@@ -36,20 +39,14 @@ PICTURE_MODE_TO_CODE = {
     "hdr1": "0E",
     "hdr2": "0F",
     "hlg": "14",
-    "hdr10+": "15",
+    "hdr10_plus": "15",
     "filmmaker": "17",
     "frame_adapt_hdr2": "18",
     "vivid": "1B",
 }
 
-# Content Type mapping from internal values to command codes (Table 3-32)
-CONTENT_TYPE_TO_CODE = {
-    "auto": "0",
-    "sdr": "1",
-    "hdr10+": "2",
-    "hdr10": "3",
-    "hlg": "4",
-}
+# Input codes (Table 3-6)
+INPUT_TO_CODE = {const.HDMI1: "6", const.HDMI2: "7"}
 
 # Dynamic Control mapping from internal values to command codes (Table 3-25)
 DYNAMIC_CTRL_TO_CODE = {
@@ -62,35 +59,34 @@ DYNAMIC_CTRL_TO_CODE = {
 # Picture modes available per content type (from NZ500 manual)
 CONTENT_TYPE_PICTURE_MODES = {
     "sdr": ["natural", "cinema", "vivid", "filmmaker", "sdr1", "sdr2"],
-    "hdr10+": ["hdr10+"],
+    "hdr10_plus": ["hdr10_plus"],
     "hdr10": ["frame_adapt_hdr", "frame_adapt_hdr2", "filmmaker", "hdr1", "hdr2"],
     "hlg": ["hlg"],
-    "auto": list(PICTURE_MODE_TO_CODE.keys()),  # All modes when in auto
 }
 
-# Select entities supported by the 2024 LAN spec
-JVC_SELECTS = (
+JVC_SELECTS: tuple[JVCSelectEntityDescription, ...] = (
     JVCSelectEntityDescription(
         key=const.PMPM,
         translation_key="jvc_picture_mode",
         command_code=command.PMPM,
-        options=list(PICTURE_MODE_TO_CODE.keys()),
+        code_map=PICTURE_MODE_TO_CODE,
+        options=list(PICTURE_MODE_TO_CODE),
         entity_category=EntityCategory.CONFIG,
     ),
-    # Input selection control
     JVCSelectEntityDescription(
         key=const.INPUT,
         translation_key="jvc_input_select",
         command_code=command.INPUT,
-        options=[const.HDMI1, const.HDMI2],
+        code_map=INPUT_TO_CODE,
+        options=list(INPUT_TO_CODE),
         entity_category=EntityCategory.CONFIG,
     ),
-    # Dynamic Control
     JVCSelectEntityDescription(
         key=const.PMDC,
         translation_key="jvc_dynamic_ctrl",
         command_code=command.PMDC,
-        options=list(DYNAMIC_CTRL_TO_CODE.keys()),
+        code_map=DYNAMIC_CTRL_TO_CODE,
+        options=list(DYNAMIC_CTRL_TO_CODE),
         entity_category=EntityCategory.CONFIG,
     ),
 )
@@ -112,153 +108,59 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
     """Select entity for JVC Projector (2024 LAN spec)."""
 
     entity_description: JVCSelectEntityDescription
+    _requires_on = True
 
     def __init__(
         self,
         coordinator: JvcProjectorDataUpdateCoordinator,
         description: JVCSelectEntityDescription,
     ) -> None:
+        """Initialize the select."""
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.unique_id}_{description.key}"
 
     @property
-    def available(self) -> bool:
-        """Return if entity is available.
-
-        Input and Picture Mode controls are only available when projector is on.
-        """
-        if not self.coordinator.last_update_success:
-            return False
-
-        power = self.coordinator.data.get(const.POWER)
-
-        # Only enable these controls when projector is on
-        if self.entity_description.key in (
-            const.INPUT,
-            const.PMPM,
-            const.PMDC,
-        ):
-            return power == const.ON
-
-        return True
-
-    @property
     def current_option(self) -> str | None:
         """Return the current selected option."""
         value = self.coordinator.data.get(self.entity_description.key)
-
         if value is None:
             return None
-
-        # Ensure the value is in our options list
-        if value in self.entity_description.options:
+        if value in self.entity_description.code_map:
             return value
-
-        _LOGGER.warning(
-            "Unknown %s value: %s",
-            self.entity_description.key,
-            value,
-        )
+        _LOGGER.debug("Unknown %s value: %s", self.entity_description.key, value)
         return None
 
     @property
     def options(self) -> list[str]:
-        """Return the list of available options.
+        """Return the available options.
 
-        For picture mode, filter options based on current content type.
+        Picture modes are filtered to those valid for the current content type.
         """
+        options = list(self.entity_description.code_map)
         if self.entity_description.key != const.PMPM:
-            return self.entity_description.options
-
-        # Get current content type from auto_content_type sensor (PMAT)
+            return options
         content_type = self.coordinator.data.get(const.auto_content_type)
-
-        # If content type is not available, return all options
-        if not content_type:
-            return self.entity_description.options
-
-        # Filter picture modes based on content type
-        filtered_modes = CONTENT_TYPE_PICTURE_MODES.get(content_type, [])
-        if not filtered_modes:
-            return self.entity_description.options
-
-        return filtered_modes
+        filtered = CONTENT_TYPE_PICTURE_MODES.get(content_type or "")
+        if not filtered:
+            return options
+        current = self.coordinator.data.get(const.PMPM)
+        if current in options and current not in filtered:
+            # HA rejects a state that isn't one of the options.
+            return [*filtered, current]
+        return filtered
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
-        # Validate against current available options (which may be filtered for picture mode)
-        if option not in self.options:
-            _LOGGER.error("Invalid option: %s", option)
-            return
-
-        # Get the command code for this option
-        if self.entity_description.key == const.PMPM:
-            code = PICTURE_MODE_TO_CODE.get(option)
-            if not code:
-                _LOGGER.error("No command code for picture mode: %s", option)
-                return
-        elif self.entity_description.key == const.INPUT:
-            # Input codes: HDMI-1 = '6', HDMI-2 = '7' (from Table 3-6)
-            code = "6" if option == const.HDMI1 else "7"
-        elif self.entity_description.key == const.PMDC:
-            code = DYNAMIC_CTRL_TO_CODE.get(option)
-            if not code:
-                _LOGGER.error("No command code for dynamic control: %s", option)
-                return
-        else:
-            _LOGGER.error("Unknown select entity: %s", self.entity_description.key)
-            return
-
-        try:
-            # Log the exact command being sent
-            full_command = self.entity_description.command_code + code
-            _LOGGER.info(
-                "Sending operation command: %s (option: %s, code: %s)",
-                full_command,
-                option,
-                code,
+        code = self.entity_description.code_map.get(option)
+        if code is None:
+            raise ServiceValidationError(
+                f"'{option}' is not a valid option for {self.entity_description.key}"
             )
-
-            # Send the operation command
-            # Note: Some projector models may not ACK operation commands
-            # or may only support certain operations based on current input signal
-            try:
-                await asyncio.wait_for(
-                    self.coordinator.device.op(full_command),
-                    timeout=5.0,  # Shorter timeout for operation commands
-                )
-                _LOGGER.info(
-                    "Successfully set %s to %s (command: %s)",
-                    self.entity_description.key,
-                    option,
-                    full_command,
-                )
-            except asyncio.TimeoutError:
-                # Operation commands may timeout if not supported or if the
-                # selected mode is not valid for the current input signal type
-                _LOGGER.warning(
-                    "Operation command %s timed out. The projector may not support "
-                    "this operation, or the selected mode (%s) may not be valid "
-                    "for the current input signal. Check that the picture mode is "
-                    "compatible with your content (SDR/HDR/HLG/etc).",
-                    full_command,
-                    option,
-                )
-                # Don't raise - allow the operation to complete silently
-
-            # Brief delay to allow projector to process command
-            # before coordinator refresh attempts to reconnect
-            await asyncio.sleep(2.0)
-
-            # Request a coordinator refresh to update the state
-            await self.coordinator.async_request_refresh()
-
-        except Exception as err:
-            _LOGGER.error(
-                "Failed to set %s to %s (code: %s): %s",
-                self.entity_description.key,
-                option,
-                code,
-                err,
-            )
+        full_command = f"{self.entity_description.command_code}{code}"
+        _LOGGER.debug(
+            "Setting %s to %s (%s)", self.entity_description.key, option, full_command
+        )
+        label = self.name if isinstance(self.name, str) else self.entity_description.key
+        await self._run(f"Setting {label} to {option}", self.device.op(full_command))
+        self.coordinator.set_optimistic(**{self.entity_description.key: option})

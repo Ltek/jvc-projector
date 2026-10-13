@@ -1,0 +1,47 @@
+[project]
+name = "ha-jvc-projector"
+version = "2026.10.13.1"
+requires-python = ">=3.13"
+
+[dependency-groups]
+dev = [
+    "homeassistant",
+    "pytest",
+    "pre-commit",
+    "ruamel-yaml>=0.19.1",
+]
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "RUF",    # ruff-specific
+    "PIE",    # flake8-pie
+    "LOG",    # flake8-logging
+    "G",      # flake8-logging-format
+    "T20",    # flake8-print — catch stray prints
+]
+ignore = [
+    "SIM108",  # use-ternary-expression — often less readable
+    "RUF012",  # mutable class attributes — the formatter table is a deliberate class constant
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore:Inheritance class HomeAssistantApplication from web.Application is discouraged:DeprecationWarning",
+]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+combine-as-imports = true
+known-first-party = ["custom_components", "tests"]

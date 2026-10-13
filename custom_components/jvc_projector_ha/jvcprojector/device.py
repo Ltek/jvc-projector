@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from hashlib import sha256
 import logging
 import re
-from time import time
+from time import monotonic
 
 from . import const
 from .command import (
@@ -29,17 +30,38 @@ from .error import (
     JvcProjectorAuthError,
     JvcProjectorCommandError,
     JvcProjectorConnectError,
+    JvcProjectorTimeoutError,
 )
 
+# Keep the socket open this long after the last command, so a burst of commands
+# (a poll, or a held remote key) reuses one connection instead of reconnecting.
 KEEPALIVE_TTL = 2
 
 # Delay between commands to prevent overwhelming the projector
 COMMAND_THROTTLE_DELAY = 0.1  # seconds
 
+# The projector refuses a new connection that comes too soon after the last one.
+RECONNECT_GUARD = 0.75  # seconds
+
+# Attempts when the projector refuses the connection or answers PJ_NG (busy).
+# Kept short: a refused projector should fail fast, not stall every command.
+CONNECT_RETRIES = 5
+
 # Regex to match a SHA256 hash (64 hex characters)
 SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def hash_password(password: str) -> str:
+    """Return the network password as the projector expects it.
+
+    A 64-character hex string is taken as already hashed. Anything else is
+    hashed as SHA-256(password + "JVCKWPJ").
+    """
+    if SHA256_PATTERN.match(password):
+        return password
+    return sha256(f"{password}{AUTH_SALT}".encode()).hexdigest()
 
 
 class JvcDevice:
@@ -52,51 +74,42 @@ class JvcDevice:
         self._conn = JvcConnection(ip, port, timeout)
         self._timeout = timeout
 
-        self._password = password or ""
-        self._auth = b""
-        self._auth_logged = False  # Track if we've logged the auth method
-
-        if password:
-            # Check if password is already a SHA256 hash (64 hex characters)
-            if SHA256_PATTERN.match(password):
-                # Password is already hashed - use it directly
-                self._auth = password.encode()
-                self._auth_type = "pre-hashed"
-            else:
-                # Password is plaintext - hash it with the salt
-                # JVC projectors require: SHA256(password + "JVCKWPJ")
-                hashed = sha256(f"{password}{AUTH_SALT}".encode()).hexdigest()
-                self._auth = hashed.encode()
-                self._auth_type = "plaintext"
-        else:
-            self._auth_type = "none"
+        self._auth = hash_password(password).encode() if password else b""
+        self._auth_type = (
+            "none"
+            if not password
+            else "pre-hashed"
+            if SHA256_PATTERN.match(password)
+            else "plaintext"
+        )
+        self._auth_logged = False
 
         self._lock = asyncio.Lock()
         self._keepalive: asyncio.Task | None = None
         self._last: float = 0.0
 
+    @property
+    def ip(self) -> str:
+        """Return the IP address this device connects to."""
+        return self._conn.ip
+
     async def send(self, cmds: list[JvcCommand]) -> None:
-        """Send commands to device."""
+        """Send commands to device.
+
+        Any failure drops the connection so the next command starts clean.
+        """
         async with self._lock:
             # Treat status refreshes with special handling
             is_refresh = len(cmds) > 1 and cmds[0].is_ref and cmds[0].is_power
 
-            # Connection keepalive window for fast command repeats
-            keepalive = True
-
-            # Connection keepalive window for fast command repeats
             if self._keepalive:
                 self._keepalive.cancel()
                 self._keepalive = None
-            elif is_refresh:
-                # Don't extend window below if this was a refresh
-                keepalive = False
 
+            ok = False
             try:
                 if not self._conn.is_connected():
                     await self._connect()
-
-                cmd = None
 
                 for cmd in cmds:
                     await self._send(cmd)
@@ -105,12 +118,10 @@ class JvcDevice:
                     # If device is not powered on, skip remaining commands
                     if is_refresh and cmds[0].response != const.ON:
                         break
-            except Exception:
-                keepalive = False
-                raise
+                ok = True
             finally:
-                # Delay disconnect to keep connection alive.
-                if keepalive and cmd and cmd.ack:
+                if ok:
+                    # Delay disconnect to keep connection alive.
                     self._keepalive = asyncio.create_task(
                         self._disconnect(KEEPALIVE_TTL)
                     )
@@ -118,56 +129,60 @@ class JvcDevice:
                     await self._disconnect()
 
     async def _connect(self) -> None:
-        """Internal connect method used by send()."""
-        # Log auth method only once per device instance
+        """Open the socket and run the PJ_OK / PJREQ / PJACK handshake."""
         if not self._auth_logged and self._auth:
-            if self._auth_type == "pre-hashed":
-                _LOGGER.debug("Using pre-hashed SHA256 password for authentication")
-            else:
-                _LOGGER.debug(
-                    "Using plaintext password (hashed with salt) for authentication"
-                )
+            _LOGGER.debug(
+                "Using %s password for authentication",
+                "pre-hashed SHA-256"
+                if self._auth_type == "pre-hashed"
+                else "plaintext",
+            )
             self._auth_logged = True
 
-        elapsed = time() - self._last
-        if elapsed < 0.75:
-            await asyncio.sleep(0.75 - elapsed)
+        elapsed = monotonic() - self._last
+        if elapsed < RECONNECT_GUARD:
+            await asyncio.sleep(RECONNECT_GUARD - elapsed)
 
         retries = 0
-        while retries < 10:
+        while retries < CONNECT_RETRIES:
             try:
                 _LOGGER.debug("Connecting to %s", self._conn.ip)
                 await self._conn.connect()
             except ConnectionRefusedError:
                 retries += 1
-                if retries == 5:
-                    _LOGGER.warning("Retrying refused connection")
-                else:
-                    _LOGGER.debug("Retrying refused connection")
-                await asyncio.sleep(0.2 * retries)
+                _LOGGER.debug("Connection refused, retry %d", retries)
+                if retries < CONNECT_RETRIES:
+                    await asyncio.sleep(0.2 * retries)
                 continue
-            except (asyncio.TimeoutError, ConnectionError) as err:
-                raise JvcProjectorConnectError from err
+            except (TimeoutError, OSError) as err:
+                raise JvcProjectorConnectError(
+                    f"Cannot connect to {self._conn.ip}: {err or 'timeout'}"
+                ) from err
 
             try:
                 data = await self._conn.read(len(PJOK))
-            except asyncio.TimeoutError as err:
+            except TimeoutError as err:
+                await self._conn.disconnect()
                 raise JvcProjectorConnectError("Handshake init timeout") from err
 
             _LOGGER.debug("Handshake received %s", data)
 
             if data == PJNG:
-                _LOGGER.warning("Handshake retrying on busy")
+                _LOGGER.debug("Handshake retrying on busy")
+                await self._conn.disconnect()
                 retries += 1
                 await asyncio.sleep(0.25 * retries)
                 continue
 
             if data != PJOK:
+                await self._conn.disconnect()
                 raise JvcProjectorCommandError("Handshake init invalid")
 
             break
         else:
-            raise JvcProjectorConnectError("Retries exceeded")
+            raise JvcProjectorConnectError(
+                f"{self._conn.ip} refused the connection or stayed busy"
+            )
 
         _LOGGER.debug("Handshake sending '%s'", PJREQ.decode())
 
@@ -179,33 +194,31 @@ class JvcDevice:
 
         try:
             data = await self._conn.read(len(PJACK))
-            _LOGGER.debug("Handshake received %s", data)
-
-            if data == PJNAK:
-                _LOGGER.error(
-                    "Projector at %s rejected the password",
-                    self._conn.ip,
-                )
-                raise JvcProjectorAuthError
-
-            if data != PJACK:
-                raise JvcProjectorCommandError("Handshake ack invalid")
-
-        except asyncio.TimeoutError as err:
+        except TimeoutError as err:
+            await self._conn.disconnect()
             raise JvcProjectorConnectError("Handshake ack timeout") from err
 
-        self._last = time()
+        _LOGGER.debug("Handshake received %s", data)
 
-    async def connect(
-        self, get_info: bool = True, timeout: float | None = None
-    ) -> None:
-        """Public connect method - wraps _connect with lock."""
+        if data == PJNAK:
+            await self._conn.disconnect()
+            _LOGGER.error("Projector at %s rejected the password", self._conn.ip)
+            raise JvcProjectorAuthError
+
+        if data != PJACK:
+            await self._conn.disconnect()
+            raise JvcProjectorCommandError("Handshake ack invalid")
+
+        self._last = monotonic()
+
+    async def connect(self) -> None:
+        """Open a connection now (used to validate host/password)."""
         async with self._lock:
             if not self._conn.is_connected():
                 await self._connect()
 
     async def _send(self, cmd: JvcCommand) -> None:
-        """Send command to device."""
+        """Send one command and read its ACK (and reply, for a reference)."""
         assert self._conn.is_connected()
         assert len(cmd.code) >= 2
 
@@ -217,17 +230,12 @@ class JvcDevice:
         )
         await self._conn.write(data)
 
-        # Log what ACK we're expecting
-        expected_ack = HEAD_ACK + code[0:2]
-        _LOGGER.debug("Expecting ACK starting with: %s", expected_ack)
-
         try:
             data = await self._conn.readline()
-        except asyncio.TimeoutError:
-            _LOGGER.warning(
-                "Response timeout for '%s' - no ACK received after 30s", cmd.code
-            )
-            return
+        except TimeoutError as err:
+            raise JvcProjectorTimeoutError(
+                f"No answer to '{cmd.code}' within {self._timeout:g} s"
+            ) from err
 
         _LOGGER.debug("Received ack %s", data)
 
@@ -239,9 +247,10 @@ class JvcDevice:
         if cmd.is_ref:
             try:
                 data = await self._conn.readline()
-            except asyncio.TimeoutError:
-                _LOGGER.warning("Ref response timeout for '%s'", cmd.code)
-                return
+            except TimeoutError as err:
+                raise JvcProjectorTimeoutError(
+                    f"No reply to '{cmd.code}' within {self._timeout:g} s"
+                ) from err
 
             _LOGGER.debug("Received ref %s (%s)", data[HEAD_LEN + 2 : -1], data)
 
@@ -254,31 +263,27 @@ class JvcDevice:
                 cmd.response = data[HEAD_LEN + 2 : -1].decode()
             except UnicodeDecodeError:
                 cmd.response = data.hex()
-                _LOGGER.warning("Failed to decode response '%s'", data)
+                _LOGGER.debug("Failed to decode response '%s'", data)
 
         cmd.ack = True
-
-    async def remote(self, code: str, timeout: float | None = None) -> None:
-        """Send a remote control code.
-
-        Remote codes are operation commands (not reference), sent as RC + 4-char hex code.
-        """
-        # Build the RC command - remote codes are operations, not references
-        rc_command = JvcCommand(f"RC{code}", is_ref=False)
-
-        # Use the standard send() method which handles locking, connection, etc.
-        await self.send([rc_command])
 
     async def disconnect(self) -> None:
         """Disconnect from device."""
         if self._keepalive:
             self._keepalive.cancel()
+            self._keepalive = None
         await self._disconnect()
 
-    async def _disconnect(self, delay: int = 0) -> None:
-        """Disconnect from device."""
+    async def _disconnect(self, delay: float = 0) -> None:
+        """Disconnect from device (optionally after a delay)."""
         if delay:
             await asyncio.sleep(delay)
+            # Close only if no command grabbed the connection meanwhile.
+            if self._lock.locked():
+                return
         self._keepalive = None
-        await self._conn.disconnect()
-        _LOGGER.debug("Disconnected")
+        if self._conn.is_connected():
+            with contextlib.suppress(Exception):
+                await self._conn.disconnect()
+            self._last = monotonic()
+            _LOGGER.debug("Disconnected")

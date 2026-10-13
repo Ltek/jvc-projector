@@ -1,247 +1,189 @@
 {
   "config": {
+    "abort": {
+      "already_configured": "Device is already configured",
+      "already_in_progress": "Configuration flow is already in progress",
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Re-configuration was successful",
+      "wrong_device": "That address answers with a different projector (MAC address doesn't match)",
+      "unknown": "Unexpected error"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Projector rejected the password",
+      "invalid_host": "Invalid hostname or IP address",
+      "unknown": "Unexpected error"
+    },
     "step": {
       "user": {
         "data": {
-          "host": "[%key:common::config_flow::data::host%]",
-          "port": "[%key:common::config_flow::data::port%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "host": "Host",
+          "port": "Port",
+          "password": "Password"
         },
         "data_description": {
-          "host": "IP address or hostname of projector",
-          "port": "IP port of projector (default is 20554)",
-          "password": "Optional password if projector is configured for one"
+          "host": "IP address or hostname of the projector",
+          "port": "IP port of the projector (default: 20554)",
+          "password": "The projector's network password: plaintext, or the pre-hashed SHA-256 value. Required by 2024-and-later models (NZ / RS series); leave empty only if your projector has none."
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure JVC Projector",
+        "description": "Change the projector's address (for example after its IP changed), port or password.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or hostname of the projector",
+          "port": "IP port of the projector (default: 20554)",
+          "password": "The projector's network password: plaintext, or the pre-hashed SHA-256 value. Required by 2024-and-later models (NZ / RS series); leave empty only if your projector has none."
         }
       },
       "reauth_confirm": {
-        "title": "[%key:common::config_flow::title::reauth%]",
-        "description": "Password authentication failed",
+        "title": "Authentication failed",
+        "description": "The projector rejected the network password. Enter it again (plaintext or pre-hashed SHA-256).",
         "data": {
-          "password": "[%key:common::config_flow::data::password%]"
+          "password": "Password"
+        },
+        "data_description": {
+          "password": "The projector's network password: plaintext, or the pre-hashed SHA-256 value. Required by 2024-and-later models (NZ / RS series); leave empty only if your projector has none."
         }
       }
-    },
-    "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-      "already_in_progress": "[%key:common::config_flow::abort::already_in_progress%]",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
-    },
-    "error": {
-      "invalid_host": "[%key:common::config_flow::error::invalid_host%]",
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "invalid_auth": "Projector rejected the password"
     }
   },
   "entity": {
     "binary_sensor": {
       "jvc_power": {
-        "name": "[%key:component::sensor::entity_component::power::name%]"
+        "name": "Power"
       },
-      "jvc_source_status": {
-        "name": "Source status"
+      "jvc_signal_present": {
+        "name": "Signal Present"
+      }
+    },
+    "sensor": {
+      "jvc_power_state": {
+        "name": "Power State",
+        "state": {
+          "on": "On",
+          "standby": "Standby",
+          "warming": "Warming",
+          "cooling": "Cooling",
+          "error": "Error"
+        }
       },
-      "jvc_low_latency_status": {
-        "name": "Low latency"
+      "jvc_light_source_time": {
+        "name": "Light Source Time"
       },
-      "jvc_eshift": {
-        "name": "e-shift"
+      "jvc_input_display": {
+        "name": "Input Display",
+        "state": {
+          "hdmi1": "HDMI-1",
+          "hdmi2": "HDMI-2"
+        }
+      },
+      "jvc_source_display": {
+        "name": "Source Display",
+        "state": {
+          "no_signal": "No signal",
+          "out_of_range": "Out of range",
+          "480p": "480p",
+          "576p": "576p",
+          "720p50": "720p50",
+          "720p60": "720p60",
+          "1080p24": "1080p24",
+          "1080p25": "1080p25",
+          "1080p30": "1080p30",
+          "1080p50": "1080p50",
+          "1080p60": "1080p60",
+          "2048x1080_p24": "2048×1080 24p",
+          "2048x1080_p25": "2048×1080 25p",
+          "2048x1080_p30": "2048×1080 30p",
+          "2048x1080_p50": "2048×1080 50p",
+          "2048x1080_p60": "2048×1080 60p",
+          "4k_3840_24": "4K (3840) 24Hz",
+          "4k_3840_25": "4K (3840) 25Hz",
+          "4k_3840_30": "4K (3840) 30Hz",
+          "4k_3840_50": "4K (3840) 50Hz",
+          "4k_3840_60": "4K (3840) 60Hz",
+          "4k_4096_24": "4K (4096) 24Hz",
+          "4k_4096_25": "4K (4096) 25Hz",
+          "4k_4096_30": "4K (4096) 30Hz",
+          "4k_4096_50": "4K (4096) 50Hz",
+          "4k_4096_60": "4K (4096) 60Hz",
+          "vga_640x480": "VGA (640×480)",
+          "svga_800x600": "SVGA (800×600)",
+          "wuxga_1920x1200": "WUXGA (1920×1200)",
+          "uxga_1600x1200": "UXGA (1600×1200)",
+          "qxga": "QXGA",
+          "wqhd60": "WQHD 60Hz"
+        }
+      },
+      "jvc_auto_content_type": {
+        "name": "Content Type",
+        "state": {
+          "sdr": "SDR",
+          "hdr10_plus": "HDR10+",
+          "hdr10": "HDR10",
+          "hlg": "HLG"
+        }
+      },
+      "jvc_colorimetry": {
+        "name": "Colorimetry",
+        "state": {
+          "no_data": "No Data",
+          "bt601": "BT.601",
+          "bt709": "BT.709",
+          "xvycc601": "xvYCC601",
+          "xvycc709": "xvYCC709",
+          "sycc601": "sYCC601",
+          "adobe_ycc601": "Adobe YCC601",
+          "adobe_rgb": "Adobe RGB",
+          "bt2020_cl": "BT.2020 Constant Luminance",
+          "bt2020_ncl": "BT.2020 Non-Constant Luminance",
+          "srgb": "sRGB",
+          "dci_p3_d65": "DCI-P3 (D65)",
+          "dci_p3_theater": "DCI-P3 (Theater)"
+        }
+      },
+      "jvc_model": {
+        "name": "Model"
       }
     },
     "select": {
-      "input": {
+      "jvc_input_select": {
         "name": "Input",
         "state": {
           "hdmi1": "HDMI 1",
           "hdmi2": "HDMI 2"
         }
       },
-      "eshift": {
-        "name": "Eshift",
-        "state": {
-          "on": "On",
-          "off": "Off"
-        }
-      },
-      "installation_mode": {
-        "name": "Installation Mode",
-        "state": {
-          "mode1": "Mode 1",
-          "mode2": "Mode 2",
-          "mode3": "Mode 3",
-          "mode4": "Mode 4",
-          "mode5": "Mode 5",
-          "mode6": "Mode 6",
-          "mode7": "Mode 7",
-          "mode8": "Mode 8",
-          "mode9": "Mode 9",
-          "mode10": "Mode 10"
-        }
-      },
-      "anamorphic": {
-        "name": "Anamorphic",
-        "state": {
-          "off": "Off",
-          "a": "Mode A",
-          "b": "Mode B",
-          "c": "Mode C",
-          "d": "Mode D"
-        }
-      },
-      "laser_power": {
-        "name": "Laser Power",
-        "state": {
-          "low": "Low",
-          "medium": "Medium",
-          "high": "High"
-        }
-      },
-      "laser_dimming": {
-        "name": "Laser Dimming",
-        "state": {
-          "off": "Off",
-          "auto1": "Auto 1",
-          "auto2": "Auto 2",
-          "auto3": "Auto 3"
-        }
-      }
-    },
-    "sensor": {
-      "jvc_power_status": {
-        "name": "Power status",
-        "state": {
-          "standby": "[%key:common::state::standby%]",
-          "on": "[%key:common::state::on%]",
-          "warming": "Warming",
-          "cooling": "Cooling",
-          "error": "Error"
-        }
-      },
-      "jvc_hdmi_input": {
-        "name": "HDMI input",
-        "state": {
-          "hdmi1": "HDMI 1",
-          "hdmi2": "HDMI 2"
-        }
-      },
       "jvc_picture_mode": {
-        "name": "Picture mode"
-      },
-      "jvc_installation_mode": {
-        "name": "Installation mode"
-      },
-      "jvc_anamorphic_mode": {
-        "name": "Anamorphic mode",
+        "name": "Picture Mode",
         "state": {
-          "off": "[%key:common::state::off%]",
-          "a": "Mode A",
-          "b": "Mode B",
-          "c": "Mode C",
-          "d": "Mode D"
-        }
-      },
-      "jvc_hdr_mode": {
-        "name": "HDR mode",
-        "state": {
-          "none": "None",
-          "hdr10": "HDR10",
-          "hdr10_plus": "HDR10+",
+          "cinema": "Cinema",
+          "natural": "Natural",
+          "frame_adapt_hdr": "Frame Adapt HDR",
+          "sdr1": "SDR1",
+          "sdr2": "SDR2",
+          "hdr1": "HDR1",
+          "hdr2": "HDR2",
           "hlg": "HLG",
-          "sdr": "SDR"
+          "hdr10_plus": "HDR10+",
+          "filmmaker": "FILMMAKER MODE",
+          "frame_adapt_hdr2": "Frame Adapt HDR 2",
+          "vivid": "Vivid"
         }
       },
-      "jvc_hdmi_input_level": {
-        "name": "HDMI input level",
+      "jvc_dynamic_ctrl": {
+        "name": "Dynamic Control",
         "state": {
-          "standard": "Standard",
-          "enhanced": "Enhanced",
-          "super_white": "Super White",
-          "auto": "Auto"
-        }
-      },
-      "jvc_hdmi_color_space": {
-        "name": "HDMI color space"
-      },
-      "jvc_color_profile": {
-        "name": "Color profile"
-      },
-      "jvc_graphics_mode": {
-        "name": "Graphic mode",
-        "state": {
-          "standard": "Standard",
-          "high-res": "High Resolution",
-          "high-res2": "High Resolution 2",
-          "off": "[%key:common::state::off%]"
-        }
-      },
-      "jvc_color_space": {
-        "name": "Color space",
-        "state": {
-          "rgb": "RGB",
-          "yuv": "YUV"
-        }
-      },
-      "jvc_laser_dimming_mode": {
-        "name": "Laser dimming",
-        "state": {
-          "off": "[%key:common::state::off%]",
-          "auto1": "Auto 1",
-          "auto2": "Auto 2",
-          "auto3": "Auto 3"
-        }
-      },
-      "jvc_laser_value": {
-        "name": "Laser value"
-      },
-      "jvc_laser_power": {
-        "name": "Laser/Lamp power",
-        "state": {
-          "low": "Low",
-          "medium": "Medium",
-          "high": "High"
-        }
-      },
-      "jvc_laser_time": {
-        "name": "Laser/Lamp time"
-      },
-      "jvc_motion_enhance": {
-        "name": "Motion enhance",
-        "state": {
-          "off": "[%key:common::state::off%]",
-          "low": "Low",
-          "high": "High"
-        }
-      },
-      "jvc_clear_motion_drive": {
-        "name": "Clear motion drive",
-        "state": {
-          "off": "[%key:common::state::off%]",
-          "none": "None",
+          "off": "Off",
           "low": "Low",
           "high": "High",
-          "inverse_telecine": "Inverse Telecine"
+          "balanced": "Balanced"
         }
-      },
-      "jvc_hdr_processing_mode": {
-        "name": "HDR processing",
-        "state": {
-          "0": "HDR10+",
-          "1": "Static",
-          "2": "Frame by Frame",
-          "3": "Scene by Scene"
-        }
-      },
-      "jvc_hdr_content_type": {
-        "name": "HDR content type",
-        "state": {
-          "auto": "Auto",
-          "sdr": "SDR",
-          "none": "None",
-          "hdr10": "HDR10",
-          "hlg": "HLG"
-        }
-      },
-      "jvc_resolution": {
-        "name": "Resolution"
       }
     },
     "number": {

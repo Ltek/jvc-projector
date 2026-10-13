@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import ipaddress
 import socket
-
-import aiodns
 
 from .error import JvcProjectorConnectError
 
@@ -42,36 +42,65 @@ class JvcConnection:
         self._reader, self._writer = await asyncio.wait_for(conn, timeout=self._timeout)
 
     async def read(self, n: int) -> bytes:
-        """Read n bytes from device."""
+        """Read exactly n bytes from device (raises on EOF)."""
         assert self._reader
-        return await asyncio.wait_for(self._reader.read(n), timeout=self._timeout)
+        try:
+            return await asyncio.wait_for(
+                self._reader.readexactly(n), timeout=self._timeout
+            )
+        except asyncio.IncompleteReadError as err:
+            raise JvcProjectorConnectError("Connection closed by projector") from err
 
     async def readline(self) -> bytes:
-        """Read all bytes up to newline from device."""
+        """Read all bytes up to newline from device (raises on EOF)."""
         assert self._reader
-        return await asyncio.wait_for(self._reader.readline(), timeout=self._timeout)
+        data = await asyncio.wait_for(self._reader.readline(), timeout=self._timeout)
+        if not data:
+            raise JvcProjectorConnectError("Connection closed by projector")
+        return data
 
     async def write(self, data: bytes) -> None:
         """Write data to device."""
         assert self._writer
-        self._writer.write(data)
-        await self._writer.drain()
+        try:
+            self._writer.write(data)
+            await self._writer.drain()
+        except (ConnectionError, OSError) as err:
+            raise JvcProjectorConnectError(f"Write failed: {err}") from err
 
     async def disconnect(self) -> None:
         """Disconnect from device."""
-        if self._writer:
-            self._writer.close()
+        writer = self._writer
         self._writer = None
         self._reader = None
+        if writer:
+            writer.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(writer.wait_closed(), timeout=1)
+
+
+def is_ip_address(host: str) -> bool:
+    """Return True if host is an IPv4/IPv6 literal (no DNS lookup needed)."""
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
 
 
 async def resolve(host: str) -> str:
-    """Resolve hostname to ip address."""
-    try:
-        res = await aiodns.DNSResolver().gethostbyname(host, socket.AF_INET)
-        if len(res.addresses) < 1:
-            raise JvcProjectorConnectError("Unexpected zero length addresses response")
-    except aiodns.error.DNSError as err:
-        raise JvcProjectorConnectError(f"Failed to resolve host {host}") from err
+    """Resolve hostname to an IPv4 address.
 
-    return res.addresses[0]
+    Uses the event loop's resolver, so no extra dependency (aiodns) is needed.
+    """
+    if is_ip_address(host):
+        return host
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(
+            host, None, family=socket.AF_INET, type=socket.SOCK_STREAM
+        )
+    except (socket.gaierror, OSError) as err:
+        raise JvcProjectorConnectError(f"Failed to resolve host {host}") from err
+    if not infos:
+        raise JvcProjectorConnectError(f"Failed to resolve host {host}")
+    return str(infos[0][4][0])

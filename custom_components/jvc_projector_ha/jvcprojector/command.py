@@ -87,7 +87,7 @@ class JvcCommand:
                 elif callable(fmt):
                     try:
                         return fmt(m)
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         msg = "response format failed with %s for '%s (%s)'"
                         _LOGGER.warning(msg, e, self.code, val)
                 break
@@ -127,31 +127,31 @@ class JvcCommand:
             "08": "1080p24",
             "09": "1080p50",
             "0A": "1080p60",
-            "0B": "No Signal",
-            "0F": "Out of Range",
-            "10": "4k(4096)60",
-            "11": "4k(4096)50",
-            "12": "4k(4096)30",
-            "13": "4k(4096)25",
-            "14": "4k(4096)24",
-            "15": "4k(3840)60",
-            "16": "4k(3840)50",
-            "17": "4k(3840)30",
-            "18": "4k(3840)25",
-            "19": "4k(3840)24",
+            "0B": "no_signal",
+            "0F": "out_of_range",
+            "10": "4k_4096_60",
+            "11": "4k_4096_50",
+            "12": "4k_4096_30",
+            "13": "4k_4096_25",
+            "14": "4k_4096_24",
+            "15": "4k_3840_60",
+            "16": "4k_3840_50",
+            "17": "4k_3840_30",
+            "18": "4k_3840_25",
+            "19": "4k_3840_24",
             "1C": "1080p25",
             "1D": "1080p30",
-            "1E": "2048x1080 p24",
-            "1F": "2048x1080 p25",
-            "20": "2048x1080 p30",
-            "21": "2048x1080 p50",
-            "22": "2048x1080 p60",
-            "25": "VGA(640x480)",
-            "26": "SVGA(800x600)",
-            "2C": "WUXGA(1920x1200)",
-            "30": "UXGA(1600x1200)",
-            "31": "QXGA",
-            "3D": "WQHD60",
+            "1E": "2048x1080_p24",
+            "1F": "2048x1080_p25",
+            "20": "2048x1080_p30",
+            "21": "2048x1080_p50",
+            "22": "2048x1080_p60",
+            "25": "vga_640x480",
+            "26": "svga_800x600",
+            "2C": "wuxga_1920x1200",
+            "30": "uxga_1600x1200",
+            "31": "qxga",
+            "3D": "wqhd60",
         },
         # Light Source Time (IFLT) - Numeric data in hex, convert to decimal
         "IFLT(....)": lambda r: str(int(r[1], 16)),
@@ -167,8 +167,8 @@ class JvcCommand:
             "sycc601",
             "adobe_ycc601",
             "adobe_rgb",
-            "bt2020(constant_luminance)",
-            "bt2020(non-constant_luminance)",
+            "bt2020_cl",
+            "bt2020_ncl",
             "srgb",
             "dci_p3_d65",
             "dci_p3_theater",
@@ -176,7 +176,7 @@ class JvcCommand:
         # Model
         "MD(.+)": lambda r: r[1].strip(),
         # Input Display (IFIN) - already handled by "(?:IP|IFIN)(.)" pattern above
-        # Picture Mode (PMPM) - Table 3-19 - Response is PM + 2 bytes (must come before PMCT!)
+        # Picture Mode (PMPM) - Table 3-19 - Response is PM + 2 bytes
         "PMPM(..)": {
             "01": "cinema",
             "03": "natural",
@@ -186,7 +186,7 @@ class JvcCommand:
             "0E": "hdr1",
             "0F": "hdr2",
             "14": "hlg",
-            "15": "hdr10+",
+            "15": "hdr10_plus",
             "17": "filmmaker",
             "18": "frame_adapt_hdr2",
             "1B": "vivid",
@@ -195,14 +195,14 @@ class JvcCommand:
         "PMCT(.)": {
             "0": "auto",
             "1": "sdr",
-            "2": "hdr10+",
+            "2": "hdr10_plus",
             "3": "hdr10",
             "4": "hlg",
         },
-        # Auto transition value for Content Type (PMAT) - Table 3-33 - Response is PM + 1 byte
+        # Auto transition value for Content Type (PMAT) - Table 3-33 - 1 byte
         "PMAT(.)": {
             "1": "sdr",
-            "2": "hdr10+",
+            "2": "hdr10_plus",
             "3": "hdr10",
             "4": "hlg",
         },
@@ -364,5 +364,7 @@ class JvcCommand:
         # Lan Setup
         "LSDS(.)": [const.OFF, const.ON],
         "LSMA(.+)": lambda r: re.sub(r"-+", "-", r[1].replace(" ", "-")),
-        "LSIP(..)(..)(..)(..)": lambda r: f"{int(r[1], 16)}.{int(r[2], 16)}.{int(r[3], 16)}.{int(r[4], 16)}",
+        "LSIP(..)(..)(..)(..)": lambda r: (
+            f"{int(r[1], 16)}.{int(r[2], 16)}.{int(r[3], 16)}.{int(r[4], 16)}"
+        ),
     }

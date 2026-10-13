@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+import contextlib
 import logging
 
 from . import command, const
 from .command import JvcCommand
-from .connection import resolve
+from .connection import is_ip_address, resolve
 from .device import JvcDevice
 from .error import JvcProjectorConnectError, JvcProjectorError
 
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_PORT = 20554
-DEFAULT_TIMEOUT = 15.0
+# Per-read timeout. A healthy projector answers in well under a second; a long
+# timeout only makes every queued command wait longer when it does not.
+DEFAULT_TIMEOUT = 5.0
 
 
 class JvcProjector:
-    """Class for interacting with a JVC Projector."""
+    """Class for interacting with a JVC Projector.
+
+    User commands (remote keys, power, settings) take priority over status
+    polling: while one is waiting, :meth:`poll_ref` holds back, so a key press
+    waits for at most the one poll command already on the wire.
+    """
 
     def __init__(
         self,
@@ -38,6 +48,15 @@ class JvcProjector:
         self._model: str = ""
         self._mac: str = ""
         self._version: str = ""
+
+        # Re-resolve the hostname before the next connection (set after a
+        # connection failure, so a changed DHCP address is picked up).
+        self._resolve_needed = True
+
+        # Priority gate: number of user commands waiting or running.
+        self._user_active = 0
+        self._user_idle = asyncio.Event()
+        self._user_idle.set()
 
     @property
     def ip(self) -> str:
@@ -64,6 +83,13 @@ class JvcProjector:
         return self._model
 
     @property
+    def model_code(self) -> str | None:
+        """Return the raw model code (MD), or None if not read yet."""
+        if not self._model or self._model == "(unknown)":
+            return None
+        return self._model
+
+    @property
     def mac(self) -> str:
         """Returns mac address."""
         if not self._mac:
@@ -73,39 +99,46 @@ class JvcProjector:
     @property
     def version(self) -> str | None:
         """Get device software version."""
-        # if not self._version:
-        #    raise JvcProjectorError("version address not initialized")
         return self._version or None
 
+    async def _ensure_device(self) -> JvcDevice:
+        """Return the device, (re)resolving the host when needed."""
+        if self._device is None or self._resolve_needed:
+            ip = await resolve(self._host)
+            self._resolve_needed = False
+            if self._device is None or ip != self._device.ip:
+                if self._device is not None:
+                    _LOGGER.info(
+                        "%s now resolves to %s (was %s)", self._host, ip, self._ip
+                    )
+                    await self._device.disconnect()
+                self._ip = ip
+                self._device = JvcDevice(ip, self._port, self._timeout, self._password)
+        return self._device
+
     async def connect(self, get_info: bool = False) -> None:
-        """Connect to device."""
-        if not self._ip:
-            self._ip = await resolve(self._host)
-
-        # Create device only once - reuse across connections
-        if self._device is None:
-            self._device = JvcDevice(
-                self._ip, self._port, self._timeout, self._password
-            )
-
-        if not await self.test():
-            raise JvcProjectorConnectError("Failed to verify connection")
-
+        """Connect to device and optionally read model and MAC address."""
+        device = await self._ensure_device()
+        try:
+            await device.connect()
+        except JvcProjectorConnectError:
+            self._mark_unreachable()
+            raise
         if get_info:
             await self.get_info()
 
-    async def disconnect(self) -> None:
-        """Disconnect from device.
+    def _mark_unreachable(self) -> None:
+        """Re-resolve the host on the next attempt (hostnames only)."""
+        if not is_ip_address(self._host):
+            self._resolve_needed = True
 
-        Note: We keep the JvcDevice instance for reuse - only the socket connection is closed.
-        """
+    async def disconnect(self) -> None:
+        """Disconnect from device (the device object is kept for reuse)."""
         if self._device:
             await self._device.disconnect()
-            # Don't set self._device = None - keep it for reuse
 
     async def get_info(self) -> dict[str, str]:
         """Get device info."""
-        assert self._device
         model = JvcCommand(command.MODEL, True)
         mac = JvcCommand(command.MAC, True)
         await self._send([model, mac])
@@ -122,8 +155,8 @@ class JvcProjector:
         return {"model": self._model, "mac": self._mac}
 
     async def get_state(self) -> dict[str, str | None]:
-        """Get device state."""
-        assert self._device
+        """Get power, input and signal (input/signal only when powered on)."""
+        await self._wait_for_user_commands()
         pwr = JvcCommand(command.POWER, True)
         inp = JvcCommand(command.INPUT, True)
         src = JvcCommand(command.SOURCE, True)
@@ -137,18 +170,6 @@ class JvcProjector:
     async def get_version(self) -> str | None:
         """Get device software version."""
         return await self.ref(command.VERSION)
-
-    async def get_power(self) -> str | None:
-        """Get power state."""
-        return await self.ref(command.POWER)
-
-    async def get_input(self) -> str | None:
-        """Get current input."""
-        return await self.ref(command.INPUT)
-
-    async def get_signal(self) -> str | None:
-        """Get if has signal."""
-        return await self.ref(command.SOURCE)
 
     async def test(self) -> bool:
         """Run test command."""
@@ -169,33 +190,41 @@ class JvcProjector:
         await self.op(f"{command.REMOTE}{code}")
 
     async def op(self, code: str) -> None:
-        """Send operation code."""
-        await self._send([JvcCommand(code, False)])
+        """Send an operation (a user command; takes priority over polling)."""
+        async with self.user_command():
+            await self._send([JvcCommand(code, False)])
 
     async def ref(self, code: str) -> str | None:
-        """Send reference code."""
+        """Send a reference (query) right away."""
         return (await self._send([JvcCommand(code, True)]))[0]
 
-    # async def _send(self, cmds: list[JvcCommand]) -> list[str | None]:
-    #     """Send command to device."""
-    #     if self._device is None:
-    #         raise JvcProjectorError("Must call connect before sending commands")
+    async def poll_ref(self, code: str) -> str | None:
+        """Send a reference for status polling; waits for user commands first."""
+        await self._wait_for_user_commands()
+        return await self.ref(code)
 
-    #     await self._device.send(cmds)
+    @contextlib.asynccontextmanager
+    async def user_command(self) -> AsyncIterator[None]:
+        """Mark a user command as pending so polling yields to it."""
+        self._user_active += 1
+        self._user_idle.clear()
+        try:
+            yield
+        finally:
+            self._user_active -= 1
+            if self._user_active == 0:
+                self._user_idle.set()
 
-    #     return [cmd.response for cmd in cmds]
+    async def _wait_for_user_commands(self) -> None:
+        """Wait until no user command is pending."""
+        await self._user_idle.wait()
 
-    # 2024 Update - Connect on demand
     async def _send(self, cmds: list[JvcCommand]) -> list[str | None]:
-        """Send command to device."""
-        if self._device is None:
-            await self.connect(False)
-
-        assert self._device is not None
-        await self._device.send(cmds)
+        """Send commands to the device (connecting on demand)."""
+        device = await self._ensure_device()
+        try:
+            await device.send(cmds)
+        except JvcProjectorConnectError:
+            self._mark_unreachable()
+            raise
         return [cmd.response for cmd in cmds]
-
-    # 2024 Update - Get light source time
-    async def get_light_source_time(self) -> str | None:
-        """Get light source (laser) usage time."""
-        return await self.ref(command.IFLT)
