@@ -34,7 +34,8 @@ def test_state_and_info():
         fake, pj = await _setup()
         await pj.connect(get_info=True)
         assert pj.mac == "E0DADC0A1B2C"
-        assert pj.model_code == "ILAFPJ -- D8A2"
+        assert pj.model_code == "ILAFPJ -- B8A1"
+        assert pj.version == "0300PJ"
         assert await pj.get_state() == {
             "power": "on",
             "input": "hdmi1",

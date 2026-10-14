@@ -116,9 +116,11 @@ class FakeProjector:
 
 
 def powered_on(**extra: str) -> dict[str, str]:
-    """Reference replies for a projector that is on with a 4K HDR10 signal."""
+    """Reference replies for an NZ900 that is on with a 4K HDR10 signal."""
     refs = {
-        "MD": "ILAFPJ -- D8A2",
+        # NZ900 family: supports every setting the integration has
+        "MD": "ILAFPJ -- B8A1",
+        "IFSV": "0300PJ",
         "LSMA": "E0DADC0A1B2C",
         "PW": "1",
         "IP": "6",
@@ -136,6 +138,14 @@ def powered_on(**extra: str) -> dict[str, str]:
         "PMLL": "0",
         "PMHP": "1",
         "PMHL": "0",
+        "PMNM": "1",
+        "PMUS": "1",
+        "PMCM": "3",
+        "PMME": "0",
+        "FUEM": "0",
+        "IFDC": "1",
+        "IFXV": "3",
+        "IFHR": "2",
     }
     refs.update(extra)
     return refs

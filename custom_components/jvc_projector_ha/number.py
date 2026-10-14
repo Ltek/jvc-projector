@@ -18,6 +18,7 @@ from . import JVCConfigEntry
 from .coordinator import JvcProjectorDataUpdateCoordinator
 from .entity import JvcProjectorEntity
 from .jvcprojector import command, const
+from .models import supports
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,8 +69,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up JVC Projector number entities from a config entry."""
     coordinator = entry.runtime_data
+    model = coordinator.device.model_code
     async_add_entities(
-        JvcNumber(coordinator, description) for description in JVC_NUMBERS
+        JvcNumber(coordinator, description)
+        for description in JVC_NUMBERS
+        if supports(model, description.command_code)
     )
 
 

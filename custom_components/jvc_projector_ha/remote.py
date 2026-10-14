@@ -81,6 +81,16 @@ class JvcProjectorRemote(JvcProjectorEntity, RemoteEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the projector on."""
+        power = self.coordinator.data.get(const.POWER)
+        if power == const.COOLING:
+            # The projector ignores power-on while cooling down; say so instead
+            # of showing "warming" for a command that does nothing.
+            raise ServiceValidationError(
+                "The projector is cooling down. It can be turned on once it "
+                "reaches standby (usually within a minute or two)."
+            )
+        if power in (const.ON, const.WARMING):
+            return
         await self._guard_if_needed(POWER_COMMAND_GUARD)
         await self._run("Power on", self.device.power_on())
         self.coordinator.set_optimistic(**{const.POWER: const.WARMING})

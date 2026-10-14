@@ -2,22 +2,24 @@
 
 A Home Assistant integration for JVC D-ILA projectors using the [**2024 External Command Communication Specification**](https://www.jvc.com/usa/projectors/installers-calibrators/external-command-communication-specification/) over the network.
 
-Current build: **v2026.10.13.2** · full history in [CHANGELOG.md](CHANGELOG.md)
+Current build: **v2026.10.14.3** · full history in [CHANGELOG.md](CHANGELOG.md)
 
 This is the Ltek version of [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha). It keeps the same integration domain (`jvc_projector_ha`), so it replaces the original in place. The [JVC Projector Card](https://github.com/Ltek/jvc-projector-card) is the matching Dashboard card (lens memory, anamorphic, HDR and low-latency rows in its Picture section).
 
 ## Supported Models
 
-Built and tested on the DLA-NZ500; it should work with other models that implement the same API:
+Built and tested on the DLA-NZ500; it should work with other models that implement the same API. The integration reads the model and creates only the controls that model supports (from [pyjvcprojector](https://github.com/SteveEasley/pyjvcprojector)'s per-model command tables):
 
-- DLA-NZ500, DLA-NZ700, DLA-NZ800, DLA-NZ900
-- DLA-RS1200, DLA-RS2200, DLA-RS3200, DLA-RS4200
-- DLA-N788, DLA-N799, DLA-N888, DLA-N899, DLA-N988
-- DLA-N700, DLA-N800, DLA-N1188
-- DLA-V800R, DLA-V900R
-- DLA-Z5, DLA-Z7
+| Family (model code) | Also sold as | Not on this family |
+|---|---|---|
+| **NZ800 / NZ900** (B8A2 / B8A1) | RS3200, RS4200, N988, N1188, V800R, V900R | — (everything) |
+| **NZ500 / NZ700** (D8A2 / D8A1) | RS1200, RS2200, N7xx, N8xx, Z5, Z7 | Low Latency, Theater Optimizer, Motion Enhance, 8K e-shift; lens memory 1–5 |
+| **NZ7 / NZ8 / NZ9, NP5** (B5A*, B5B1) | RS2100, RS3100, RS4100, RS1100 | 8K e-shift, laser power, Dynamic Control |
+| **NX5 / NX7 / NX9** (B2A*) | RS1000, RS2000, RS3000 | 8K e-shift, laser power, Dynamic Control |
 
-The [**2025 specification**](https://www.jvc.com/usa/projectors/installers-calibrators/external_command_dlanz900_series/) for the DLA-NZ800 / NZ900 uses the same API.
+An unknown model gets every control; a command it doesn't answer is retried only once a minute. The [**2025 specification**](https://www.jvc.com/usa/projectors/installers-calibrators/external_command_dlanz900_series/) for the DLA-NZ800 / NZ900 uses the same API.
+
+> **ECO Mode must be off** for Home Assistant to reach the projector in standby (and so to turn it on). With ECO Mode on, the projector switches its network off in standby, and the integration shows it as not connected until it is turned on with the remote. The **ECO Mode** switch shows the setting.
 
 ---
 
@@ -36,7 +38,12 @@ The [**2025 specification**](https://www.jvc.com/usa/projectors/installers-calib
 | Anamorphic | Off / A / B / C / D |
 | HDR Processing | Static / Frame by Frame / Scene by Scene. Shows HDR10+ when the projector uses it for HDR10+ content (it can't be selected). Available only while the source is HDR. |
 | HDR Level | Auto / −2 … +2 / Auto (Wide). Available only while the source is HDR. |
-| Low Latency | On / off. The projector refuses it while some picture settings are active (you get an error). |
+| Low Latency | On / off. The projector refuses it while some picture settings are active (you get an error). While it is on, Clear Motion Drive and Dynamic Control are unavailable. |
+| Theater Optimizer | On / off. Available only while the source is HDR. |
+| Clear Motion Drive | Off / Low / High / Inverse Telecine (NZ500 / NZ700: Off / Low / High) |
+| Motion Enhance | Off / Low / High |
+| 8K e-shift | On / off (NZ800 / NZ900) |
+| ECO Mode | On / off — keep it **off** (see above) |
 
 **Sensors** (diagnostic)
 
@@ -47,9 +54,18 @@ The [**2025 specification**](https://www.jvc.com/usa/projectors/installers-calib
 | Source Display | Resolution and rate (4K (3840) 24Hz, 1080p60, No signal…) |
 | Content Type | SDR / HDR10 / HDR10+ / HLG |
 | Colorimetry | BT.709, BT.2020, DCI-P3… |
+| Color Depth | 8 / 10 / 12-bit |
+| Color Space | RGB, YCbCr 4:4:4 / 4:2:2 / 4:2:0 |
+| HDR Signal | SDR, HDR10 (SMPTE ST 2084), HLG, HDR10+ |
+| Software Version | The projector's firmware version; also shown on the device page |
+| Connection | Whether the integration reaches the projector. Always available, so a Dashboard can tell *not reachable* from *off*. |
 | Input Display, Model, Power, Signal Present | Disabled by default |
 
-Controls are available only while the projector is on.
+Controls are available only while the projector is on. Turning the projector on while it is cooling down gives an error instead of doing nothing: it can be turned on once it reaches standby.
+
+**Diagnostics:** Settings → Devices & Services → JVC Projector → ⋮ → Download diagnostics gives the model, specification, firmware version, failing queries and current state (password and host redacted).
+
+**Firmware updates** can't be started over the network: JVC's control protocol only reports the version. Update from a USB stick as JVC describes for your model.
 
 When a command fails (the projector is unreachable, or it doesn't answer because the setting isn't valid with the current signal), the Dashboard shows an error instead of the change silently not happening.
 
@@ -96,7 +112,7 @@ data:
 
 Key presses and setting changes go ahead of status polling: a key waits for at most the one status query already in flight, not for the whole poll.
 
-An example button layout is in [`custom_components/jvc_projector_ha/lovelace/jvc_remote_card.yaml`](custom_components/jvc_projector_ha/lovelace/jvc_remote_card.yaml).
+For a ready-made Dashboard remote, use the [JVC Projector Card](https://github.com/Ltek/jvc-projector-card).
 
 ---
 
@@ -156,7 +172,7 @@ If your projector only has a wired network connection, a travel router such as t
 
 ## Polling
 
-Every 10 s the integration reads power, input and signal, and (while on) picture mode, dynamic control, laser power, source resolution and content type. Light-source hours, colorimetry, input display, installation mode, anamorphic, low latency and the HDR settings are read once a minute and whenever power, input, signal, picture mode or content type changes. A value you set from Home Assistant shows immediately. With no signal, the signal-only queries are skipped. A query that keeps failing (for example a command your model doesn't support) is logged once and then retried only once a minute.
+Every 10 s the integration reads power, input and signal, and (while on) picture mode, dynamic control, laser power, source resolution and content type. Light-source hours, colorimetry, color depth / space, HDR signal, input display, installation mode, anamorphic, low latency, motion settings, e-shift, ECO mode, Theater Optimizer and the HDR settings are read once a minute and whenever power, input, signal, picture mode or content type changes. A value you set from Home Assistant shows immediately. With no signal, the signal-only queries are skipped. A query that keeps failing (for example a command your model doesn't support) is logged once and then retried only once a minute.
 
 ---
 

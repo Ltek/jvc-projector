@@ -35,6 +35,15 @@ INVS: Final = "INVS"  # Anamorphic
 PMLL: Final = "PMLL"  # Low Latency
 PMHP: Final = "PMHP"  # HDR Processing
 PMHL: Final = "PMHL"  # HDR Level
+PMNM: Final = "PMNM"  # Theater Optimizer
+PMUS: Final = "PMUS"  # 8K e-shift
+PMCM: Final = "PMCM"  # Clear Motion Drive
+PMME: Final = "PMME"  # Motion Enhance
+FUEM: Final = "FUEM"  # ECO Mode
+IFDC: Final = "IFDC"  # Deep Color (bit depth)
+IFXV: Final = "IFXV"  # Color Space (signal)
+IFHR: Final = "IFHR"  # HDR (signal)
+VERSION: Final = "version"  # Software version (IFSV)
 
 # Content types (PMAT) that are HDR
 HDR_CONTENT: Final = ("hdr10", "hdr10_plus", "hlg")

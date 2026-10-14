@@ -48,6 +48,14 @@ INVS: Final = "INVS"  # Anamorphic
 PMLL: Final = "PMLL"  # Low Latency
 PMHP: Final = "PMHP"  # HDR Processing
 PMHL: Final = "PMHL"  # HDR Level (HDR Quantizer)
+PMNM: Final = "PMNM"  # Theater Optimizer
+PMUS: Final = "PMUS"  # 8K e-shift
+PMCM: Final = "PMCM"  # Clear Motion Drive
+PMME: Final = "PMME"  # Motion Enhance
+FUEM: Final = "FUEM"  # ECO Mode
+IFDC: Final = "IFDC"  # Deep Color (bit depth)
+IFXV: Final = "IFXV"  # Color Space (signal)
+IFHR: Final = "IFHR"  # HDR (signal)
 
 AUTH_SALT: Final = "JVCKWPJ"
 
@@ -289,8 +297,17 @@ class JvcCommand:
         },
         # Picture Mode - Color Management, Low Latency, 8K E-Shift
         "PM(?:CB|LL|US)(.)": ["off", "on"],
-        # Picture Mode - Clear Motion Drive
-        "PMCM(.)": ["off", None, None, "low", "high", "inverse_telecine"],
+        # Picture Mode - Clear Motion Drive. The codes differ by model: 3/4/5 on
+        # NZ800/900 and older, 6 (high) / 7 (low) on NZ500/700 (pyjvcprojector
+        # CS20241 vs CS20242). Decoding is unambiguous; encoding is per model.
+        "PMCM(.)": {
+            "0": "off",
+            "3": "low",
+            "4": "high",
+            "5": "inverse_telecine",
+            "6": "high",
+            "7": "low",
+        },
         # Picture Mode - Motion Enhance
         "PMME(.)": ["off", "low", "high"],
         # Picture Mode - Dynamic Control (Table 3-25)
@@ -353,14 +370,15 @@ class JvcCommand:
         "FU(?:EM|CF)(.)": ["off", "on"],
         # Function - Deep Color
         "IFDC(.)": ["8bit", "10bit", "12bit"],
-        # Function - Color Space
-        "IFXV(.)": ["rgb", "yuv"],
+        # Function - Color Space (2019-and-later models)
+        "IFXV(.)": ["rgb", "ycbcr_422", "ycbcr_444", "ycbcr_420"],
         # Function - HDR
         "IFHR(.)": {
             "0": "sdr",
             "1": "hdr",
             "2": "smpte_st_2084",
             "3": "hybrid_log",
+            "4": "hdr10_plus",
             "F": "none",
         },
         # Picture Mode - HDR Level (HDR Quantizer)

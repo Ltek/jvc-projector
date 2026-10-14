@@ -11,13 +11,14 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
 
-from .const import NAME
+from .const import DOMAIN, NAME
 from .jvcprojector import command, const
 from .jvcprojector.error import (
     JvcProjectorAuthError,
@@ -25,6 +26,7 @@ from .jvcprojector.error import (
     JvcProjectorError,
 )
 from .jvcprojector.projector import JvcProjector
+from .models import supports
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,7 +74,20 @@ QUERIES: tuple[Query, ...] = (
     Query(const.PMLL, command.PMLL, slow=True),
     Query(const.PMHP, command.PMHP, needs_signal=True, needs_hdr=True, slow=True),
     Query(const.PMHL, command.PMHL, needs_signal=True, needs_hdr=True, slow=True),
+    Query(const.PMNM, command.PMNM, needs_signal=True, needs_hdr=True, slow=True),
+    Query(const.PMUS, command.PMUS, slow=True),
+    Query(const.PMCM, command.PMCM, slow=True),
+    Query(const.PMME, command.PMME, slow=True),
+    Query(const.FUEM, command.FUEM, slow=True),
+    # Signal details: re-read on the slow schedule and whenever input, signal,
+    # picture mode or content type change.
+    Query(const.IFDC, command.IFDC, needs_signal=True, slow=True),
+    Query(const.IFXV, command.IFXV, needs_signal=True, slow=True),
+    Query(const.IFHR, command.IFHR, needs_signal=True, slow=True),
 )
+
+# Attempts (one per minute) to read the software version if setup couldn't.
+VERSION_TRIES = 3
 
 # Values kept while the projector is off (they don't change in standby).
 KEEP_WHEN_OFF = (const.IFLT, const.MODEL)
@@ -102,6 +117,7 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Consecutive failures per query key, and keys already warned about.
         self._failures: dict[str, int] = {}
         self._warned: set[str] = set()
+        self._version_tries = 0
 
         _LOGGER.debug(
             "Initialized JVC Projector coordinator for %s (%s)",
@@ -147,6 +163,12 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._poll_count += 1
         self._last_base = base
 
+        if slow_due and not self.device.version and self._version_tries < VERSION_TRIES:
+            self._version_tries += 1
+            await self._read_version()
+        if self.device.version:
+            result[const.VERSION] = self.device.version
+
         if power != const.ON:
             return result
 
@@ -177,9 +199,25 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("State from %s: %s", self.device.host, result)
         return result
 
+    @property
+    def failures(self) -> dict[str, int]:
+        """Consecutive failures per query key (for diagnostics)."""
+        return dict(self._failures)
+
     def queries(self) -> tuple[Query, ...]:
-        """Return the optional queries for a powered-on projector."""
-        return QUERIES
+        """Return the optional queries this model supports (projector on)."""
+        model = self.device.model_code
+        return tuple(q for q in QUERIES if supports(model, q.code))
+
+    async def _read_version(self) -> None:
+        """Read the software version if setup couldn't, and show it on the device."""
+        version = await self.device.read_version()
+        if not version:
+            return
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device(identifiers={(DOMAIN, self.unique_id)})
+        if device and device.sw_version != version:
+            registry.async_update_device(device.id, sw_version=version)
 
     async def _query(self, result: dict[str, Any], query: Query) -> None:
         """Run one optional query; a failure skips just that value."""

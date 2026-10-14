@@ -60,6 +60,9 @@
       },
       "jvc_signal_present": {
         "name": "Signal Present"
+      },
+      "jvc_connection": {
+        "name": "Connection"
       }
     },
     "sensor": {
@@ -149,6 +152,37 @@
       },
       "jvc_model": {
         "name": "Model"
+      },
+      "jvc_software_version": {
+        "name": "Software Version"
+      },
+      "jvc_color_depth": {
+        "name": "Color Depth",
+        "state": {
+          "8bit": "8-bit",
+          "10bit": "10-bit",
+          "12bit": "12-bit"
+        }
+      },
+      "jvc_color_space": {
+        "name": "Color Space",
+        "state": {
+          "rgb": "RGB",
+          "ycbcr_422": "YCbCr 4:2:2",
+          "ycbcr_444": "YCbCr 4:4:4",
+          "ycbcr_420": "YCbCr 4:2:0"
+        }
+      },
+      "jvc_hdr_signal": {
+        "name": "HDR Signal",
+        "state": {
+          "sdr": "SDR",
+          "hdr": "HDR",
+          "smpte_st_2084": "HDR10 (SMPTE ST 2084)",
+          "hybrid_log": "HLG (Hybrid Log-Gamma)",
+          "hdr10_plus": "HDR10+",
+          "none": "None"
+        }
       }
     },
     "select": {
@@ -230,6 +264,23 @@
           "plus_2": "+2",
           "auto_wide": "Auto (Wide)"
         }
+      },
+      "jvc_clear_motion_drive": {
+        "name": "Clear Motion Drive",
+        "state": {
+          "off": "Off",
+          "low": "Low",
+          "high": "High",
+          "inverse_telecine": "Inverse Telecine"
+        }
+      },
+      "jvc_motion_enhance": {
+        "name": "Motion Enhance",
+        "state": {
+          "off": "Off",
+          "low": "Low",
+          "high": "High"
+        }
       }
     },
     "number": {
@@ -240,6 +291,15 @@
     "switch": {
       "jvc_low_latency": {
         "name": "Low Latency"
+      },
+      "jvc_theater_optimizer": {
+        "name": "Theater Optimizer"
+      },
+      "jvc_eshift": {
+        "name": "8K e-shift"
+      },
+      "jvc_eco_mode": {
+        "name": "ECO Mode"
       }
     }
   }

@@ -1,25 +1,16 @@
 """Constants for the jvc_projector Home Assistant integration."""
 
 from .jvcprojector import const as pj
+from .models import model_name
 
 NAME = "JVC Projector"
 DOMAIN = "jvc_projector_ha"
 MANUFACTURER = "JVC"
 
-# Model name mapping from internal codes to product names
-MODEL_MAPPING = {
-    "ILAFPJ -- D8A1": "DLA-NZ700",
-    "ILAFPJ -- D8A2": "DLA-NZ500",
-    "ILAFPJ -- B8A1": "DLA-NZ900",
-    "ILAFPJ -- B8A2": "DLA-NZ900",
-}
-
 
 def decode_model(raw_model: str | None) -> str | None:
-    """Decode internal model code to product name."""
-    if not raw_model:
-        return None
-    return MODEL_MAPPING.get(raw_model, raw_model)
+    """Decode the model code (MD reply) to a product name, e.g. 'DLA-NZ800'."""
+    return model_name(raw_model)
 
 
 # Remote buttons exposed to Home Assistant.

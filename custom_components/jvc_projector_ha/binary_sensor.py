@@ -59,9 +59,11 @@ async def async_setup_entry(
     """Set up the JVC Projector binary sensor platform."""
     coordinator: JvcProjectorDataUpdateCoordinator = entry.runtime_data
 
-    async_add_entities(
+    entities: list[BinarySensorEntity] = [
         JvcBinarySensor(coordinator, description) for description in JVC_BINARY_SENSORS
-    )
+    ]
+    entities.append(JvcConnectionSensor(coordinator))
+    async_add_entities(entities)
 
 
 class JvcBinarySensor(JvcProjectorEntity, BinarySensorEntity):
@@ -84,3 +86,30 @@ class JvcBinarySensor(JvcProjectorEntity, BinarySensorEntity):
         """Return the sensor state."""
         value = self.coordinator.data.get(self.entity_description.key)
         return self.entity_description.value_fn(value)
+
+
+class JvcConnectionSensor(JvcProjectorEntity, BinarySensorEntity):
+    """Whether the integration reaches the projector.
+
+    Always available, so a Dashboard (or an automation) can tell "the projector
+    is not reachable" apart from "the projector is off".
+    """
+
+    _attr_translation_key = "jvc_connection"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: JvcProjectorDataUpdateCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.unique_id}_connection"
+
+    @property
+    def available(self) -> bool:
+        """Always available: this sensor reports the connection itself."""
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        """Return True while polling succeeds."""
+        return self.coordinator.last_update_success

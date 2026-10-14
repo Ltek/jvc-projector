@@ -32,6 +32,9 @@ def _formatter_values(pattern: str) -> list[str]:
 SOURCE_DISPLAY_OPTIONS = _formatter_values("IFIS(..)")
 COLORIMETRY_OPTIONS = _formatter_values("IFCM(.)")
 CONTENT_TYPE_OPTIONS = _formatter_values("PMAT(.)")
+COLOR_DEPTH_OPTIONS = _formatter_values("IFDC(.)")
+COLOR_SPACE_OPTIONS = _formatter_values("IFXV(.)")
+HDR_SIGNAL_OPTIONS = _formatter_values("IFHR(.)")
 
 POWERED_DOWN = (const.STANDBY, const.COOLING)
 
@@ -88,6 +91,33 @@ JVC_SENSORS = (
         translation_key="jvc_model",
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
+    ),
+    JVCSensorEntityDescription(
+        key=const.VERSION,
+        translation_key="jvc_software_version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    # Signal details (from the source's HDMI stream)
+    JVCSensorEntityDescription(
+        key=const.IFDC,
+        translation_key="jvc_color_depth",
+        device_class=SensorDeviceClass.ENUM,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        options=COLOR_DEPTH_OPTIONS,
+    ),
+    JVCSensorEntityDescription(
+        key=const.IFXV,
+        translation_key="jvc_color_space",
+        device_class=SensorDeviceClass.ENUM,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        options=COLOR_SPACE_OPTIONS,
+    ),
+    JVCSensorEntityDescription(
+        key=const.IFHR,
+        translation_key="jvc_hdr_signal",
+        device_class=SensorDeviceClass.ENUM,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        options=HDR_SIGNAL_OPTIONS,
     ),
 )
 

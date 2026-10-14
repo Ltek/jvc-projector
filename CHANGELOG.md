@@ -4,6 +4,23 @@ Builds are numbered `YYYY.MM.DD.BUILD`. Everything before the first entry is the
 [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha) history (version 0.1.4),
 preserved in this repository's git log up to upstream commit `850aca6`.
 
+## v2026.10.14.3
+
+Phase 3: model-aware controls, firmware version, connection status.
+
+- **Controls follow the model.** The integration reads the model code and creates only what that model supports (from pyjvcprojector's per-specification command tables). On the NZ500 / NZ700 family the **Low Latency** switch is no longer created — those models don't have it.
+- **Model names fixed and extended:** B8A2 is the NZ800 (it was shown as NZ900); NZ7 / NZ8 / NZ9, NP5 and NX5 / NX7 / NX9 are recognised.
+- New controls: **Theater Optimizer** (HDR only), **Clear Motion Drive** (codes differ on NZ500 / NZ700, handled per model), **Motion Enhance**, **8K e-shift** (NZ800 / NZ900), **ECO Mode**.
+- Clear Motion Drive and Dynamic Control are unavailable while Low Latency is on (the projector disables them).
+- New sensors: **Color Depth**, **Color Space**, **HDR Signal**, **Software Version**. The firmware version is now read at setup (retried later if the projector doesn't answer) and shown on the device page — it was never read before.
+- **Connection** binary sensor: always available, on while the integration reaches the projector.
+- **Diagnostics** download (password and host redacted).
+- Turning on while the projector is cooling down raises a clear error instead of showing "warming" for a command the projector ignores; turning on when already on does nothing.
+- Decoding fixes: Color Space reported only RGB / YUV (now RGB / YCbCr 4:4:4 / 4:2:2 / 4:2:0); HDR Signal lacked HDR10+.
+- README: ECO Mode must be off for control in standby; supported-model table; firmware updates are USB-only.
+- Removed the old example YAML remote (`lovelace/jvc_remote_card.yaml`); the JVC Projector Card replaces it.
+- Tests for all of the above, including an NZ500 that gets only what it supports. **Not yet verified on a real projector:** the new controls, and lens memory over the network.
+
 ## v2026.10.13.2
 
 Phase 2: new controls from the command table.

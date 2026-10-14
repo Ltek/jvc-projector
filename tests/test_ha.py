@@ -9,9 +9,13 @@ from time import monotonic
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 import pytest
 
 from custom_components.jvc_projector_ha.const import DOMAIN
+from custom_components.jvc_projector_ha.diagnostics import (
+    async_get_config_entry_diagnostics,
+)
 from tests.fake_projector import FakeProjector, powered_on
 from tests.ha_harness import home_assistant
 
@@ -29,6 +33,17 @@ ANAMORPHIC = "select.jvc_projector_anamorphic"
 HDR_PROCESSING = "select.jvc_projector_hdr_processing"
 HDR_LEVEL = "select.jvc_projector_hdr_level"
 LOW_LATENCY = "switch.jvc_projector_low_latency"
+THEATER_OPTIMIZER = "switch.jvc_projector_theater_optimizer"
+ESHIFT = "switch.jvc_projector_8k_e_shift"
+ECO = "switch.jvc_projector_eco_mode"
+CMD = "select.jvc_projector_clear_motion_drive"
+MOTION = "select.jvc_projector_motion_enhance"
+CONNECTION = "binary_sensor.jvc_projector_connection"
+VERSION = "sensor.jvc_projector_software_version"
+COLOR_DEPTH = "sensor.jvc_projector_color_depth"
+COLOR_SPACE = "sensor.jvc_projector_color_space"
+HDR_SIGNAL = "sensor.jvc_projector_hdr_signal"
+NZ500 = "ILAFPJ -- D8A2"
 
 
 async def _add(hass: HomeAssistant, fake: FakeProjector, password: str | None = None):
@@ -43,12 +58,14 @@ async def _add(hass: HomeAssistant, fake: FakeProjector, password: str | None = 
 
 
 def scenario(
-    fn: Callable[[HomeAssistant, FakeProjector], Awaitable[None]], **fake_kw
+    fn: Callable[[HomeAssistant, FakeProjector], Awaitable[None]],
+    refs: dict[str, str] | None = None,
+    **fake_kw,
 ) -> None:
     """Run fn(hass, fake) with the integration set up against a fake projector."""
 
     async def go():
-        fake = await FakeProjector(refs=powered_on(), **fake_kw).start()
+        fake = await FakeProjector(refs=refs or powered_on(), **fake_kw).start()
         try:
             async with home_assistant() as hass:
                 entry = await _add(hass, fake, fake.password)
@@ -308,7 +325,7 @@ def test_lens_memory_and_anamorphic():
         assert _state(hass, ANAMORPHIC) == "a"
         assert _state(hass, LENS) == "memory_3"
 
-    scenario(check)
+    scenario(check, refs=powered_on(MD=NZ500))
 
 
 def test_low_latency_switch():
@@ -359,3 +376,148 @@ def test_settings_unavailable_in_standby():
             assert _state(hass, entity_id) == "unavailable"
 
     scenario(check)
+
+
+def test_new_settings_on_an_nz900():
+    async def check(hass, fake):
+        assert _state(hass, THEATER_OPTIMIZER) == "on"
+        assert _state(hass, ESHIFT) == "on"
+        assert _state(hass, ECO) == "off"
+        assert _state(hass, CMD) == "low"
+        assert hass.states.get(CMD).attributes["options"] == [
+            "off",
+            "low",
+            "high",
+            "inverse_telecine",
+        ]
+        assert _state(hass, MOTION) == "off"
+
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": THEATER_OPTIMIZER}, blocking=True
+        )
+        assert "PMNM0" in fake.codes("!")
+        await hass.services.async_call(
+            "switch", "turn_off", {"entity_id": ESHIFT}, blocking=True
+        )
+        assert "PMUS0" in fake.codes("!")
+        await _select(hass, CMD, "inverse_telecine")
+        assert "PMCM5" in fake.codes("!")
+        await _select(hass, MOTION, "high")
+        assert "PMME2" in fake.codes("!")
+        await _refresh(hass)
+        assert _state(hass, CMD) == "inverse_telecine"
+        assert _state(hass, MOTION) == "high"
+
+    scenario(check)
+
+
+def test_signal_details_version_and_connection():
+    async def check(hass, fake):
+        assert _state(hass, COLOR_DEPTH) == "10bit"
+        assert _state(hass, COLOR_SPACE) == "ycbcr_420"
+        assert _state(hass, HDR_SIGNAL) == "smpte_st_2084"
+        assert _state(hass, VERSION) == "0300PJ"
+        assert _state(hass, CONNECTION) == "on"
+
+        # firmware version on the device page
+        device = next(iter(dr.async_get(hass).devices.values()))
+        assert device.sw_version == "0300PJ"
+        assert device.model == "DLA-NZ900"
+
+        await fake.stop()
+        entry = hass.config_entries.async_entries(DOMAIN)[0]
+        await entry.runtime_data.device.disconnect()
+        await _refresh(hass)
+        assert _state(hass, REMOTE) == "unavailable"
+        assert _state(hass, CONNECTION) == "off"  # still available, reports off
+
+    scenario(check)
+
+
+def test_nz500_gets_only_what_it_supports():
+    async def check(hass, fake):
+        ids = hass.states.async_entity_ids()
+        for entity_id in (LOW_LATENCY, THEATER_OPTIMIZER, ESHIFT, MOTION):
+            assert entity_id not in ids, entity_id
+        assert ECO in ids and CMD in ids
+        # NZ500 Clear Motion Drive: off / low (7) / high (6), no inverse telecine
+        assert hass.states.get(CMD).attributes["options"] == ["off", "low", "high"]
+        assert _state(hass, CMD) == "high"
+        await _select(hass, CMD, "low")
+        assert "PMCM7" in fake.codes("!")
+        await _refresh(hass)
+        assert "PMNM" not in fake.codes("?") and "PMUS" not in fake.codes("?")
+
+    scenario(check, refs=powered_on(MD=NZ500, PMCM="6"))
+
+
+def test_low_latency_disables_cmd_and_dynamic_control():
+    async def check(hass, fake):
+        assert _state(hass, CMD) == "low"
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": LOW_LATENCY}, blocking=True
+        )
+        assert _state(hass, CMD) == "unavailable"
+        assert _state(hass, DYNAMIC) == "unavailable"
+
+    scenario(check)
+
+
+def test_theater_optimizer_needs_hdr():
+    async def check(hass, fake):
+        fake.refs["PMAT"] = "1"  # SDR
+        await _refresh(hass)
+        assert _state(hass, THEATER_OPTIMIZER) == "unavailable"
+
+    scenario(check)
+
+
+def test_power_on_while_cooling_is_refused():
+    async def check(hass, fake):
+        fake.refs["PW"] = "2"  # cooling
+        await _refresh(hass)
+        start = len(fake.log)
+        with pytest.raises(HomeAssistantError, match="cooling down"):
+            await hass.services.async_call(
+                "remote", "turn_on", {"entity_id": REMOTE}, blocking=True
+            )
+        assert "PW1" not in fake.codes("!")[start:]
+
+        fake.refs["PW"] = "0"  # standby: works
+        await _refresh(hass)
+        await hass.services.async_call(
+            "remote", "turn_on", {"entity_id": REMOTE}, blocking=True
+        )
+        assert "PW1" in fake.codes("!")
+
+    scenario(check)
+
+
+def test_missing_version_is_read_later():
+    async def check(hass, fake):
+        assert _state(hass, VERSION) == "unknown"
+        fake.refs["IFSV"] = "0310PJ"
+        fake.silent.discard("IFSV")
+        entry = hass.config_entries.async_entries(DOMAIN)[0]
+        entry.runtime_data._force_slow = True
+        await _refresh(hass)
+        assert _state(hass, VERSION) == "0310PJ"
+        device = next(iter(dr.async_get(hass).devices.values()))
+        assert device.sw_version == "0310PJ"
+
+    refs = powered_on()
+    del refs["IFSV"]
+    scenario(check, refs=refs, silent={"IFSV"})
+
+
+def test_diagnostics_redacts_password_and_host():
+    async def check(hass, fake):
+        entry = hass.config_entries.async_entries(DOMAIN)[0]
+        diag = await async_get_config_entry_diagnostics(hass, entry)
+        assert diag["entry"][CONF_PASSWORD] == "**REDACTED**"
+        assert diag["entry"][CONF_HOST] == "**REDACTED**"
+        assert diag["projector"]["specification"] == "CS20241"
+        assert diag["projector"]["software_version"] == "0300PJ"
+        assert diag["coordinator"]["last_update_success"] is True
+
+    scenario(check, password="MyPassword")

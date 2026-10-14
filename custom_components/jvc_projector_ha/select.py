@@ -16,6 +16,7 @@ from . import JVCConfigEntry
 from .coordinator import JvcProjectorDataUpdateCoordinator
 from .entity import JvcProjectorEntity
 from .jvcprojector import command, const
+from .models import cmd_codes, supports
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +37,10 @@ class JVCSelectEntityDescription(SelectEntityDescription):
     op_timeout: float | None = None
     # Narrows the options for a model code (MD), e.g. 5 lens memories on NZ500.
     options_fn: Callable[[str | None], list[str]] | None = None
+    # Option -> code for a model code, when the codes differ between models.
+    code_map_fn: Callable[[str | None], dict[str, str]] | None = None
+    # Not available while Low Latency is on (the projector disables it then).
+    requires_low_latency_off: bool = False
 
 
 # Picture Mode mapping from internal values to command codes (Table 3-19)
@@ -99,6 +104,11 @@ HDR_LEVEL_TO_CODE = {
     "auto_wide": "6",
 }
 
+MOTION_ENHANCE_TO_CODE = {"off": "0", "low": "1", "high": "2"}
+
+# Every Clear Motion Drive option any model has (codes come from models.cmd_codes).
+CLEAR_MOTION_DRIVE_OPTIONS = ["off", "low", "high", "inverse_telecine"]
+
 # Picture modes available per content type (from NZ500 manual)
 CONTENT_TYPE_PICTURE_MODES = {
     "sdr": ["natural", "cinema", "vivid", "filmmaker", "sdr1", "sdr2"],
@@ -130,6 +140,7 @@ JVC_SELECTS: tuple[JVCSelectEntityDescription, ...] = (
         command_code=command.PMDC,
         code_map=DYNAMIC_CTRL_TO_CODE,
         options=list(DYNAMIC_CTRL_TO_CODE),
+        requires_low_latency_off=True,
         entity_category=EntityCategory.CONFIG,
     ),
     JVCSelectEntityDescription(
@@ -170,6 +181,24 @@ JVC_SELECTS: tuple[JVCSelectEntityDescription, ...] = (
         requires_hdr=True,
         entity_category=EntityCategory.CONFIG,
     ),
+    JVCSelectEntityDescription(
+        key=const.PMCM,
+        translation_key="jvc_clear_motion_drive",
+        command_code=command.PMCM,
+        options=CLEAR_MOTION_DRIVE_OPTIONS,
+        code_map_fn=cmd_codes,
+        options_fn=lambda model: list(cmd_codes(model)),
+        requires_low_latency_off=True,
+        entity_category=EntityCategory.CONFIG,
+    ),
+    JVCSelectEntityDescription(
+        key=const.PMME,
+        translation_key="jvc_motion_enhance",
+        command_code=command.PMME,
+        code_map=MOTION_ENHANCE_TO_CODE,
+        options=list(MOTION_ENHANCE_TO_CODE),
+        entity_category=EntityCategory.CONFIG,
+    ),
 )
 
 
@@ -180,8 +209,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up JVC Projector select entities from a config entry."""
     coordinator = entry.runtime_data
+    model = coordinator.device.model_code
     async_add_entities(
-        JvcSelect(coordinator, description) for description in JVC_SELECTS
+        JvcSelect(coordinator, description)
+        for description in JVC_SELECTS
+        if supports(model, description.command_code)
     )
 
 
@@ -206,10 +238,22 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
         """Return if entity is available (HDR settings need an HDR source)."""
         if not super().available:
             return False
-        if self.entity_description.requires_hdr:
-            content = self.coordinator.data.get(const.auto_content_type)
-            return content in const.HDR_CONTENT
+        data = self.coordinator.data
+        if (
+            self.entity_description.requires_hdr
+            and data.get(const.auto_content_type) not in const.HDR_CONTENT
+        ):
+            return False
+        if self.entity_description.requires_low_latency_off:
+            return data.get(const.PMLL) != const.ON
         return True
+
+    def _code_map(self) -> dict[str, str]:
+        """Return option -> code for this projector."""
+        description = self.entity_description
+        if description.code_map_fn is not None:
+            return description.code_map_fn(self.coordinator.data.get(const.MODEL))
+        return description.code_map
 
     @property
     def current_option(self) -> str | None:
@@ -217,7 +261,7 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
         value = self.coordinator.data.get(self.entity_description.key)
         if value is None:
             return None
-        if value in self.entity_description.code_map:
+        if value in self._code_map():
             return value
         _LOGGER.debug("Unknown %s value: %s", self.entity_description.key, value)
         return None
@@ -231,7 +275,7 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
         description = self.entity_description
         if description.options_fn is not None:
             return description.options_fn(self.coordinator.data.get(const.MODEL))
-        options = list(description.code_map)
+        options = list(self._code_map())
         if description.key != const.PMPM:
             return options
         content_type = self.coordinator.data.get(const.auto_content_type)
@@ -247,7 +291,7 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
         description = self.entity_description
-        code = description.code_map.get(option)
+        code = self._code_map().get(option)
         if code is None or option not in self.options:
             raise ServiceValidationError(
                 f"'{option}' is not a valid option for {description.key}"

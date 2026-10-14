@@ -12,6 +12,12 @@
         "state": {
           "on": "mdi:audio-video"
         }
+      },
+      "jvc_connection": {
+        "default": "mdi:lan-disconnect",
+        "state": {
+          "on": "mdi:lan-connect"
+        }
       }
     },
     "sensor": {
@@ -82,6 +88,18 @@
           "qxga": "mdi:high-definition",
           "wqhd60": "mdi:high-definition"
         }
+      },
+      "jvc_software_version": {
+        "default": "mdi:chip"
+      },
+      "jvc_color_depth": {
+        "default": "mdi:palette-swatch-variant"
+      },
+      "jvc_color_space": {
+        "default": "mdi:palette-outline"
+      },
+      "jvc_hdr_signal": {
+        "default": "mdi:hdr"
       }
     },
     "select": {
@@ -108,6 +126,12 @@
       },
       "jvc_hdr_level": {
         "default": "mdi:tune-vertical"
+      },
+      "jvc_clear_motion_drive": {
+        "default": "mdi:motion-play-outline"
+      },
+      "jvc_motion_enhance": {
+        "default": "mdi:run-fast"
       }
     },
     "number": {
@@ -120,6 +144,21 @@
         "default": "mdi:timer-sand-off",
         "state": {
           "on": "mdi:speedometer"
+        }
+      },
+      "jvc_theater_optimizer": {
+        "default": "mdi:theater"
+      },
+      "jvc_eshift": {
+        "default": "mdi:grid-off",
+        "state": {
+          "on": "mdi:grid"
+        }
+      },
+      "jvc_eco_mode": {
+        "default": "mdi:leaf-off",
+        "state": {
+          "on": "mdi:leaf"
         }
       }
     }

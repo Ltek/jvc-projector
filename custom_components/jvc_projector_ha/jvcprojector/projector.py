@@ -152,7 +152,24 @@ class JvcProjector:
         self._model = model.response
         self._mac = mac.response
 
+        # Software version: nice to have, so a projector that doesn't answer IFSV
+        # still sets up (the coordinator tries again later).
+        await self.read_version()
+
         return {"model": self._model, "mac": self._mac}
+
+    async def read_version(self) -> str | None:
+        """Read and remember the software version (IFSV); None if not answered."""
+        try:
+            value = await self.ref(command.VERSION)
+        except JvcProjectorConnectError:
+            raise
+        except JvcProjectorError as err:
+            _LOGGER.debug("Software version not available: %s", err)
+            return None
+        if value:
+            self._version = value.strip()
+        return self.version
 
     async def get_state(self) -> dict[str, str | None]:
         """Get power, input and signal (input/signal only when powered on)."""
