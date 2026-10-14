@@ -4,7 +4,7 @@ A Home Assistant integration for JVC D-ILA projectors using the [**2024 External
 
 Current build: **v2026.10.14.3** · full history in [CHANGELOG.md](CHANGELOG.md)
 
-This is the Ltek version of [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha). It keeps the same integration domain (`jvc_projector_ha`), so it replaces the original in place. The [JVC Projector Card](https://github.com/Ltek/jvc-projector-card) is the matching Dashboard card (lens memory, anamorphic, HDR and low-latency rows in its Picture section).
+This is the Ltek version of [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha). It keeps the same integration domain (`jvc_projector_ha`), so it replaces the original in place. The [JVC Projector Card](https://github.com/Ltek/jvc-projector-card) is the matching Dashboard card: v2026.10.14.3 or later shows every control here (lens memory, anamorphic, HDR, Theater Optimizer, motion, e-shift, low latency, ECO mode), plus firmware, signal details and the connection state.
 
 ## Supported Models
 
