@@ -118,7 +118,8 @@ def test_models_and_support():
     assert models.spec_for("ILAFPJ -- B8A3") == models.CS20241  # new variant
     assert models.spec_for(None) is None
     assert not models.supports("ILAFPJ -- D8A2", "PMLL")
-    assert not models.supports("ILAFPJ -- B5A1", "PMUS")
+    assert models.supports("ILAFPJ -- B5A1", "PMUS")  # NZ9 has e-shift
+    assert not models.supports("ILAFPJ -- B5B1", "PMUS")  # NP5 does not
     assert models.supports("ILAFPJ -- B8A1", "PMUS")
     assert models.supports("ILAFPJ -- ????", "PMUS")  # unknown: try it
     assert models.cmd_codes("ILAFPJ -- D8A1") == {"off": "0", "low": "7", "high": "6"}
@@ -177,3 +178,18 @@ def test_installation_mode_options_per_model():
     assert len(select.installation_mode_options("ILAFPJ -- D8A1")) == 5  # NZ700
     assert len(select.installation_mode_options("ILAFPJ -- B8A1")) == 10  # NZ900
     assert len(select.installation_mode_options(None)) == 10
+
+
+def test_eshift_follows_pyjvcprojector_per_model():
+    from custom_components.jvc_projector_ha.models import supports
+
+    for code, expected in {
+        "B8A1": True,  # NZ900
+        "B8A2": True,  # NZ800
+        "D8A2": False,  # NZ500
+        "B5A2": True,  # NZ8
+        "B5B1": False,  # NP5
+        "B2A1": True,  # NX9
+        "B2A3": False,  # NX5
+    }.items():
+        assert supports(f"ILAFPJ -- {code}", "PMUS") is expected, code

@@ -44,9 +44,16 @@ UNSUPPORTED: dict[str, frozenset[str]] = {
     const.PMLL: frozenset({CS20242}),  # Low Latency
     const.PMNM: frozenset({CS20242}),  # Theater Optimizer
     const.PMME: frozenset({CS20242}),  # Motion Enhance
-    const.PMUS: frozenset({CS20242, CS20221, CS20191}),  # 8K e-shift: NZ800/900 only
+    const.PMUS: frozenset({CS20242, CS20221, CS20191}),  # e-shift; see SUPPORTED_MODELS
     const.PMCV: frozenset({CS20221, CS20191}),  # Laser power (LD current)
     const.PMDC: frozenset({CS20221, CS20191}),  # Dynamic control
+}
+
+# Exceptions: models that support a command their specification otherwise doesn't.
+# pyjvcprojector: e-shift on CS20221 only for B5A1/B5A2/B5A3 (NZ9/NZ8/NZ7, not the NP5),
+# and on CS20191 only for B2A1 (NX9).
+SUPPORTED_MODELS: dict[str, frozenset[str]] = {
+    const.PMUS: frozenset({"B5A1", "B5A2", "B5A3", "B2A1", "A2B1"}),
 }
 
 # Clear Motion Drive option -> code, per specification.
@@ -95,6 +102,8 @@ def supports(raw: str | None, command: str) -> bool:
     """Return whether this model supports a command (True for an unknown model)."""
     spec = spec_for(raw)
     if spec is None:
+        return True
+    if model_code(raw) in SUPPORTED_MODELS.get(command, frozenset()):
         return True
     return spec not in UNSUPPORTED.get(command, frozenset())
 

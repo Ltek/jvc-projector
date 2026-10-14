@@ -14,8 +14,8 @@ Built and tested on the DLA-NZ500; it should work with other models that impleme
 |---|---|---|
 | **NZ800 / NZ900** (B8A2 / B8A1) | RS3200, RS4200, N988, N1188, V800R, V900R | — (everything) |
 | **NZ500 / NZ700** (D8A2 / D8A1) | RS1200, RS2200, N7xx, N8xx, Z5, Z7 | Low Latency, Theater Optimizer, Motion Enhance, 8K e-shift; lens memory 1–5 |
-| **NZ7 / NZ8 / NZ9, NP5** (B5A*, B5B1) | RS2100, RS3100, RS4100, RS1100 | 8K e-shift, laser power, Dynamic Control |
-| **NX5 / NX7 / NX9** (B2A*) | RS1000, RS2000, RS3000 | 8K e-shift, laser power, Dynamic Control |
+| **NZ7 / NZ8 / NZ9, NP5** (B5A*, B5B1) | RS2100, RS3100, RS4100, RS1100 | laser power, Dynamic Control; 8K e-shift on the NP5 |
+| **NX5 / NX7 / NX9** (B2A*) | RS1000, RS2000, RS3000 | laser power, Dynamic Control; 8K e-shift except on the NX9 |
 
 An unknown model gets every control; a command it doesn't answer is retried only once a minute. The [**2025 specification**](https://www.jvc.com/usa/projectors/installers-calibrators/external_command_dlanz900_series/) for the DLA-NZ800 / NZ900 uses the same API.
 
@@ -42,7 +42,7 @@ An unknown model gets every control; a command it doesn't answer is retried only
 | Theater Optimizer | On / off. Available only while the source is HDR. |
 | Clear Motion Drive | Off / Low / High / Inverse Telecine (NZ500 / NZ700: Off / Low / High) |
 | Motion Enhance | Off / Low / High |
-| 8K e-shift | On / off (NZ800 / NZ900) |
+| 8K e-shift | On / off (NZ800 / NZ900, NZ7 / NZ8 / NZ9, NX9) |
 | ECO Mode | On / off — keep it **off** (see above) |
 
 **Sensors** (diagnostic)

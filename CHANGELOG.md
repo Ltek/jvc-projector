@@ -10,7 +10,7 @@ Phase 3: model-aware controls, firmware version, connection status.
 
 - **Controls follow the model.** The integration reads the model code and creates only what that model supports (from pyjvcprojector's per-specification command tables). On the NZ500 / NZ700 family the **Low Latency** switch is no longer created — those models don't have it.
 - **Model names fixed and extended:** B8A2 is the NZ800 (it was shown as NZ900); NZ7 / NZ8 / NZ9, NP5 and NX5 / NX7 / NX9 are recognised.
-- New controls: **Theater Optimizer** (HDR only), **Clear Motion Drive** (codes differ on NZ500 / NZ700, handled per model), **Motion Enhance**, **8K e-shift** (NZ800 / NZ900), **ECO Mode**.
+- New controls: **Theater Optimizer** (HDR only), **Clear Motion Drive** (codes differ on NZ500 / NZ700, handled per model), **Motion Enhance**, **8K e-shift** (NZ800 / NZ900, NZ7 / NZ8 / NZ9, NX9), **ECO Mode**.
 - Clear Motion Drive and Dynamic Control are unavailable while Low Latency is on (the projector disables them).
 - New sensors: **Color Depth**, **Color Space**, **HDR Signal**, **Software Version**. The firmware version is now read at setup (retried later if the projector doesn't answer) and shown on the device page — it was never read before.
 - **Connection** binary sensor: always available, on while the integration reaches the projector.
