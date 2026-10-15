@@ -2,7 +2,7 @@
 
 A Home Assistant integration for JVC D-ILA projectors using the [**2024 External Command Communication Specification**](https://www.jvc.com/usa/projectors/installers-calibrators/external-command-communication-specification/) over the network.
 
-Current build: **v2026.10.14.3** · full history in [CHANGELOG.md](CHANGELOG.md)
+Current build: **v2026.10.15.4** · full history in [CHANGELOG.md](CHANGELOG.md)
 
 This is the Ltek version of [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha). It keeps the same integration domain (`jvc_projector_ha`), so it replaces the original in place. The [JVC Projector Card](https://github.com/Ltek/jvc-projector-card) is the matching Dashboard card: v2026.10.14.3 or later shows every control here (lens memory, anamorphic, HDR, Theater Optimizer, motion, e-shift, low latency, ECO mode), plus firmware, signal details and the connection state.
 
@@ -143,6 +143,20 @@ You need:
 
 To change the address, port or password later: **Settings → Devices & Services → JVC Projector → ⋮ → Reconfigure**.
 
+### Timing
+
+**Settings → Devices & Services → JVC Projector → Configure** sets how the integration talks to the projector. The defaults suit most projectors.
+
+| Option | Default | What it does |
+|---|---|---|
+| Poll interval | 10 s | How often the projector is asked for its state. |
+| Response timeout | 5 s | Wait for an answer to a query or a quick command (remote key, power). |
+| Picture mode / input change timeout | 10 s | The projector answers these only once the change is done. |
+| Lens memory timeout | 30 s | The projector answers once the lens has stopped moving. |
+| Recovery pause | 30 s | When the projector stops answering, stop polling it this long so it can recover (0 = off). Your own commands are still sent; one that is answered ends the pause. |
+
+If a setting does change on the projector but Home Assistant says *the projector did not answer*, raise that timeout. If the projector often stops answering, a longer poll interval or recovery pause gives it more rest.
+
 ### Network password
 
 2024-and-later JVC models require a network password for control. Set one on the projector with the remote; it must be 8–10 characters, e.g. `MyPassword`.
@@ -172,7 +186,7 @@ If your projector only has a wired network connection, a travel router such as t
 
 ## Polling
 
-Every 10 s the integration reads power, input and signal, and (while on) picture mode, dynamic control, laser power, source resolution and content type. Light-source hours, colorimetry, color depth / space, HDR signal, input display, installation mode, anamorphic, low latency, motion settings, e-shift, ECO mode, Theater Optimizer and the HDR settings are read once a minute and whenever power, input, signal, picture mode or content type changes. A value you set from Home Assistant shows immediately. With no signal, the signal-only queries are skipped. A query that keeps failing (for example a command your model doesn't support) is logged once and then retried only once a minute.
+Every 10 s (the Poll interval option) the integration reads power, input and signal, and (while on) picture mode, dynamic control, laser power, source resolution and content type. Light-source hours, colorimetry, color depth / space, HDR signal, input display, installation mode, anamorphic, low latency, motion settings, e-shift, ECO mode, Theater Optimizer and the HDR settings are read once a minute and whenever power, input, signal, picture mode or content type changes. A value you set from Home Assistant shows immediately. With no signal, the signal-only queries are skipped. A query that keeps failing (for example a command your model doesn't support) is logged once and then retried only once a minute. When a query gets no answer, the rest of that poll is skipped (the last values are kept) instead of sending the projector more commands it isn't answering.
 
 ---
 

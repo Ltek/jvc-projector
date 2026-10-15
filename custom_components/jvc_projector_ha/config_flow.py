@@ -7,8 +7,15 @@ from collections.abc import Mapping
 import logging
 from typing import Any
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
+from homeassistant.core import callback
+from homeassistant.helpers import selector
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.util.network import is_host_valid
 import voluptuous as vol
@@ -16,6 +23,7 @@ import voluptuous as vol
 from .const import DOMAIN, NAME
 from .jvcprojector.error import JvcProjectorAuthError, JvcProjectorConnectError
 from .jvcprojector.projector import DEFAULT_PORT, JvcProjector
+from .options import LIMITS, Timing
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,6 +85,12 @@ class JvcProjectorConfigFlow(ConfigFlow, domain=DOMAIN):
     """Config flow for the JVC Projector integration."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Return the options flow (timing)."""
+        return JvcOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -165,3 +179,31 @@ class JvcProjectorConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Optional(CONF_PASSWORD): str}),
             errors=errors,
         )
+
+
+class JvcOptionsFlow(OptionsFlow):
+    """Timing options: poll interval, timeouts and the recovery pause."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show and save the timing options."""
+        if user_input is not None:
+            # Store only what differs from the default (clean options).
+            values = vars(Timing.from_options(user_input))
+            data = {k: v for k, v in values.items() if v != LIMITS[k][0]}
+            return self.async_create_entry(data=data)
+
+        current = vars(Timing.from_options(self.config_entry.options))
+        fields: dict[Any, Any] = {}
+        for key, (_default, low, high) in LIMITS.items():
+            fields[vol.Required(key, default=current[key])] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=low,
+                    max=high,
+                    step=0.5 if high <= 60 else 1,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            )
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(fields))

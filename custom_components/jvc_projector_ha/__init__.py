@@ -23,6 +23,7 @@ from .jvcprojector.error import (
     JvcProjectorError,
 )
 from .jvcprojector.projector import JvcProjector
+from .options import Timing
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,11 +44,13 @@ SETUP_TIMEOUT = 30  # seconds
 async def async_setup_entry(hass: HomeAssistant, entry: JVCConfigEntry) -> bool:
     """Set up integration from a config entry."""
     host = entry.data[CONF_HOST]
+    timing = Timing.from_options(entry.options)
 
     device = JvcProjector(
         host=host,
         port=entry.data[CONF_PORT],
         password=entry.data.get(CONF_PASSWORD),
+        timeout=timing.response_timeout,
     )
 
     try:
@@ -63,7 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: JVCConfigEntry) -> bool:
         await device.disconnect()
         raise ConfigEntryNotReady(f"Unable to connect to {host}: {err}") from err
 
-    coordinator = JvcProjectorDataUpdateCoordinator(hass, entry, device)
+    coordinator = JvcProjectorDataUpdateCoordinator(hass, entry, device, timing)
     entry.runtime_data = coordinator
 
     try:
@@ -79,9 +82,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: JVCConfigEntry) -> bool:
     entry.async_on_unload(
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, disconnect_on_stop)
     )
+    entry.async_on_unload(entry.add_update_listener(_options_updated))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _options_updated(hass: HomeAssistant, entry: JVCConfigEntry) -> None:
+    """Apply changed timing options by reloading the entry."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: JVCConfigEntry) -> bool:

@@ -72,9 +72,11 @@ class JvcProjectorEntity(CoordinatorEntity[JvcProjectorDataUpdateCoordinator]):
         try:
             await command
         except JvcProjectorTimeoutError as err:
+            self.coordinator.note_command_timeout()
             raise HomeAssistantError(
                 f"{what}: the projector did not answer ({err}). It may not "
-                "support this setting with the current signal or mode."
+                "support this setting with the current signal or mode, or it "
+                "needs longer: see the timeouts under Configure."
             ) from err
         except JvcProjectorConnectError as err:
             raise HomeAssistantError(
@@ -82,3 +84,5 @@ class JvcProjectorEntity(CoordinatorEntity[JvcProjectorDataUpdateCoordinator]):
             ) from err
         except JvcProjectorError as err:
             raise HomeAssistantError(f"{what} failed: {err}") from err
+        # It answered, so a recovery pause (if any) can end now.
+        self.coordinator.end_quiet()

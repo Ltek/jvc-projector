@@ -33,8 +33,9 @@ class JVCSelectEntityDescription(SelectEntityDescription):
     read_only: frozenset[str] = frozenset()
     # Only available while the source is HDR (HDR10, HDR10+, HLG).
     requires_hdr: bool = False
-    # Read timeout for the set command (None = default).
-    op_timeout: float | None = None
+    # Which timing option limits the set command: "change" (picture mode,
+    # input), "lens" (lens memory), or None for the response timeout.
+    op_timeout: str | None = None
     # Narrows the options for a model code (MD), e.g. 5 lens memories on NZ500.
     options_fn: Callable[[str | None], list[str]] | None = None
     # Option -> code for a model code, when the codes differ between models.
@@ -124,6 +125,7 @@ JVC_SELECTS: tuple[JVCSelectEntityDescription, ...] = (
         command_code=command.PMPM,
         code_map=PICTURE_MODE_TO_CODE,
         options=list(PICTURE_MODE_TO_CODE),
+        op_timeout="change",
         entity_category=EntityCategory.CONFIG,
     ),
     JVCSelectEntityDescription(
@@ -132,6 +134,7 @@ JVC_SELECTS: tuple[JVCSelectEntityDescription, ...] = (
         command_code=command.INPUT,
         code_map=INPUT_TO_CODE,
         options=list(INPUT_TO_CODE),
+        op_timeout="change",
         entity_category=EntityCategory.CONFIG,
     ),
     JVCSelectEntityDescription(
@@ -151,7 +154,7 @@ JVC_SELECTS: tuple[JVCSelectEntityDescription, ...] = (
         options=list(INSTALLATION_MODE_TO_CODE),
         options_fn=installation_mode_options,
         # The projector answers only once the lens has finished moving.
-        op_timeout=30,
+        op_timeout="lens",
         entity_category=EntityCategory.CONFIG,
     ),
     JVCSelectEntityDescription(
@@ -248,6 +251,14 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
             return data.get(const.PMLL) != const.ON
         return True
 
+    def _op_timeout(self) -> float | None:
+        """Return the timeout for setting this select (from the options)."""
+        timing = self.coordinator.timing
+        return {
+            "change": timing.change_timeout,
+            "lens": timing.lens_timeout,
+        }.get(self.entity_description.op_timeout or "")
+
     def _code_map(self) -> dict[str, str]:
         """Return option -> code for this projector."""
         description = self.entity_description
@@ -307,6 +318,6 @@ class JvcSelect(JvcProjectorEntity, SelectEntity):
         label = self.name if isinstance(self.name, str) else self.entity_description.key
         await self._run(
             f"Setting {label} to {option}",
-            self.device.op(full_command, timeout=description.op_timeout),
+            self.device.op(full_command, timeout=self._op_timeout()),
         )
         self.coordinator.set_optimistic(**{self.entity_description.key: option})

@@ -4,6 +4,16 @@ Builds are numbered `YYYY.MM.DD.BUILD`. Everything before the first entry is the
 [mjmcg/jvc_projector_ha](https://github.com/mjmcg/jvc_projector_ha) history (version 0.1.4),
 preserved in this repository's git log up to upstream commit `850aca6`.
 
+## v2026.10.15.4
+
+Timing options, and leaving a projector that stops answering alone.
+
+- **Configure** (Settings → Devices & Services → JVC Projector → Configure) sets the **poll interval** (10 s), **response timeout** (5 s), **picture mode / input change timeout** (10 s), **lens memory timeout** (30 s) and **recovery pause** (30 s). Changes apply at once (the entry reloads); only values that differ from the default are stored.
+- Picture mode and input changes now wait up to 10 s by default (were 5 s): the projector answers them only once the change is done, and pyjvcprojector allows 10 s. A change that took longer failed and dropped the connection while the projector was still busy.
+- When a status query gets no answer, the rest of that poll is skipped (last values kept) instead of reconnecting and sending more queries. Queries that keep failing are tried last, so they don't block the others.
+- **Recovery pause:** when the projector stops answering (the power query, or one of your commands, times out), polling stops for the pause so the projector can recover. Your own commands are still sent; one that is answered ends the pause. After a timed-out command, entities keep their last state during the pause.
+- The "did not answer" error now points to the timeout options.
+
 ## v2026.10.14.3
 
 Phase 3: model-aware controls, firmware version, connection status.

@@ -302,5 +302,27 @@
         "name": "ECO Mode"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Timing",
+        "description": "How the integration talks to the projector. The defaults suit most projectors. If a setting does change on the projector but Home Assistant reports that the projector did not answer, raise its timeout.",
+        "data": {
+          "poll_interval": "Poll interval",
+          "response_timeout": "Response timeout",
+          "change_timeout": "Picture mode / input change timeout",
+          "lens_timeout": "Lens memory timeout",
+          "recovery_pause": "Recovery pause"
+        },
+        "data_description": {
+          "poll_interval": "How often the projector is asked for its state (default 10 s).",
+          "response_timeout": "How long to wait for an answer to a query or a quick command such as a remote key or power (default 5 s).",
+          "change_timeout": "Picture mode and input changes: the projector answers only once the change is done (default 10 s).",
+          "lens_timeout": "Lens memory: the projector answers once the lens has stopped moving (default 30 s).",
+          "recovery_pause": "When the projector stops answering, stop polling it for this long so it can recover (default 30 s, 0 = off). Your own commands are still sent, and one that is answered ends the pause."
+        }
+      }
+    }
   }
 }

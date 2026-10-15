@@ -521,3 +521,128 @@ def test_diagnostics_redacts_password_and_host():
         assert diag["coordinator"]["last_update_success"] is True
 
     scenario(check, password="MyPassword")
+
+
+async def _options(hass: HomeAssistant, values: dict) -> None:
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    assert flow["step_id"] == "init"
+    result = await hass.config_entries.options.async_configure(flow["flow_id"], values)
+    assert result["type"] == "create_entry", result
+    await hass.async_block_till_done()
+
+
+def test_timing_options_are_stored_sparse_and_applied():
+    async def check(hass, fake):
+        entry = hass.config_entries.async_entries(DOMAIN)[0]
+        await _options(
+            hass,
+            {
+                "poll_interval": 20,
+                "response_timeout": 5,
+                "change_timeout": 15,
+                "lens_timeout": 45,
+                "recovery_pause": 30,
+            },
+        )
+        # only non-defaults are stored
+        assert dict(entry.options) == {
+            "poll_interval": 20,
+            "change_timeout": 15,
+            "lens_timeout": 45,
+        }
+        coordinator = entry.runtime_data  # reloaded with the new options
+        assert coordinator.update_interval.total_seconds() == 20
+        assert coordinator.timing.change_timeout == 15
+        assert _state(hass, REMOTE) == "on"
+
+        # a picture-mode change that takes 12 s now succeeds (default 10 s fails)
+        fake.delays["!PMPM"] = 12
+        await _select(hass, PICTURE, "hdr2")
+        assert _state(hass, PICTURE) == "hdr2"
+
+    scenario(check)
+
+
+def test_change_timeout_defaults_to_10_s():
+    async def check(hass, fake):
+        fake.delays["!PMPM"] = 7  # longer than the 5 s response timeout
+        await _select(hass, PICTURE, "hdr2")
+        assert "PMPM0F" in fake.codes("!")
+        assert _state(hass, PICTURE) == "hdr2"
+
+    scenario(check)
+
+
+def test_no_answer_ends_the_poll_and_pauses_polling():
+    async def check(hass, fake):
+        entry = hass.config_entries.async_entries(DOMAIN)[0]
+        await _options(hass, {"response_timeout": 1, "recovery_pause": 30})
+        coordinator = entry.runtime_data
+
+        fake.silent.add("PMDC")  # the second query of the poll gets no answer
+        start = len(fake.log)
+        await _refresh(hass)
+        sent = fake.codes("?")[start:]
+        assert "PMDC" in sent
+        assert "PMCV" not in sent, "kept sending after no answer"
+        assert _state(hass, DYNAMIC) == "balanced"  # old value kept
+
+        # the power query itself gets no answer: polling pauses
+        fake.silent.add("PW")
+        await _refresh(hass)
+        assert coordinator.quiet
+        assert _state(hass, REMOTE) == "unavailable"
+        start = len(fake.log)
+        await _refresh(hass)
+        assert fake.log[start:] == [], "contacted the projector during the pause"
+
+        # after the pause it polls again
+        fake.silent.clear()
+        coordinator._quiet_until = 0.0  # as if the 30 s had passed
+        await _refresh(hass)
+        assert _state(hass, REMOTE) == "on"
+
+    scenario(check)
+
+
+def test_recovery_pause_zero_keeps_polling():
+    async def check(hass, fake):
+        entry = hass.config_entries.async_entries(DOMAIN)[0]
+        await _options(hass, {"response_timeout": 1, "recovery_pause": 0})
+        fake.silent.add("PW")
+        await _refresh(hass)
+        assert not entry.runtime_data.quiet
+        start = len(fake.log)
+        await _refresh(hass)
+        assert fake.codes("?")[start:][:1] == ["PW"]
+
+    scenario(check)
+
+
+def test_unanswered_command_pauses_polling_but_keeps_state():
+    async def check(hass, fake):
+        entry = hass.config_entries.async_entries(DOMAIN)[0]
+        await _options(hass, {"response_timeout": 1})
+        fake.silent.add("!PW")
+        with pytest.raises(HomeAssistantError, match="did not answer"):
+            await hass.services.async_call(
+                "remote", "turn_off", {"entity_id": REMOTE}, blocking=True
+            )
+        assert entry.runtime_data.quiet
+        start = len(fake.log)
+        await _refresh(hass)
+        assert fake.log[start:] == []
+        assert _state(hass, REMOTE) == "on"  # stays available, last state
+
+        # a command that is answered ends the pause
+        fake.silent.clear()
+        await hass.services.async_call(
+            "remote",
+            "send_command",
+            {"entity_id": REMOTE, "command": "menu"},
+            blocking=True,
+        )
+        assert not entry.runtime_data.quiet
+
+    scenario(check)

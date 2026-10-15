@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
+from time import monotonic
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -24,18 +25,19 @@ from .jvcprojector.error import (
     JvcProjectorAuthError,
     JvcProjectorConnectError,
     JvcProjectorError,
+    JvcProjectorTimeoutError,
 )
 from .jvcprojector.projector import JvcProjector
 from .models import supports
+from .options import DEFAULT_TIMING, Timing
 
 _LOGGER = logging.getLogger(__name__)
 
-# Fast schedule: power, input, signal and the picture settings shown live.
-UPDATE_INTERVAL = timedelta(seconds=10)
-
-# Slow schedule: every Nth fast poll (and whenever power, input or signal
+# Fast schedule (the Poll interval option, 10 s by default): power, input,
+# signal and the picture settings shown live.
+# Slow schedule: about once a minute (and whenever power, input or signal
 # changes) the rarely-changing values are read too.
-SLOW_EVERY = 6  # x 10 s = 1 minute
+SLOW_PERIOD = 60  # seconds
 
 # Upper bound for one whole poll, so a wedged projector can't stall HA.
 POLL_TIMEOUT = 45  # seconds
@@ -97,7 +99,11 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator for JVC Projector state (2024 spec)."""
 
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, device: JvcProjector
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        device: JvcProjector,
+        timing: Timing = DEFAULT_TIMING,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -105,8 +111,14 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             config_entry=entry,
             logger=_LOGGER,
             name=NAME,
-            update_interval=UPDATE_INTERVAL,
+            update_interval=timedelta(seconds=timing.poll_interval),
         )
+        self.timing = timing
+        # Every Nth poll also reads the slow values (about once a minute).
+        self._slow_every = max(1, round(SLOW_PERIOD / timing.poll_interval))
+        # While the projector recovers from not answering, polls don't contact it.
+        self._quiet_until = 0.0
+        self._quiet_error: str | None = None
 
         self.device = device
         self.unique_id = format_mac(device.mac)
@@ -127,11 +139,21 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch state from the projector."""
+        if monotonic() < self._quiet_until:
+            # Leave a projector that stopped answering alone for a while.
+            if self._quiet_error is not None:
+                raise UpdateFailed(self._quiet_error)
+            return dict(self.data or {})
         try:
             async with asyncio.timeout(POLL_TIMEOUT):
                 return await self._poll()
         except TimeoutError as err:
+            self._start_quiet("Timeout polling projector")
             raise UpdateFailed("Timeout polling projector") from err
+        except JvcProjectorTimeoutError as err:
+            message = f"The projector stopped answering: {err}"
+            self._start_quiet(message)
+            raise UpdateFailed(message) from err
         except JvcProjectorAuthError as err:
             raise ConfigEntryAuthFailed("Password authentication failed") from err
         except JvcProjectorError as err:
@@ -154,7 +176,7 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         power = result.get(const.POWER)
         base = (power, result.get(const.INPUT), result.get(const.SOURCE))
         slow_due = (
-            self._poll_count % SLOW_EVERY == 0
+            self._poll_count % self._slow_every == 0
             or base != self._last_base
             or not prev
             or self._force_slow
@@ -176,7 +198,13 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not has_signal:
             result[const.IFIS] = "no_signal"
 
-        for query in self.queries():
+        stopped = False
+        for query in self._ordered_queries():
+            if stopped:
+                # The projector stopped answering this poll: keep the old values.
+                if query.key in prev:
+                    result[query.key] = prev[query.key]
+                continue
             if query.needs_signal and not has_signal:
                 continue
             if (
@@ -189,7 +217,11 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if query.key in prev:
                     result[query.key] = prev[query.key]
                 continue
-            await self._query(result, query)
+            if not await self._query(result, query):
+                # No answer: don't send it the rest of the list right away.
+                stopped = True
+                if query.key in prev:
+                    result[query.key] = prev[query.key]
 
         # A new picture mode or content type can change the picture settings.
         for key in (const.PMPM, const.auto_content_type):
@@ -203,6 +235,49 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def failures(self) -> dict[str, int]:
         """Consecutive failures per query key (for diagnostics)."""
         return dict(self._failures)
+
+    def _start_quiet(self, error: str | None) -> None:
+        """Stop polling for the Recovery pause (if set) after no answer."""
+        pause = self.timing.recovery_pause
+        if pause <= 0:
+            return
+        self._quiet_until = monotonic() + pause
+        self._quiet_error = error
+        _LOGGER.info(
+            "%s did not answer; pausing polling for %g s so it can recover",
+            self.device.host,
+            pause,
+        )
+
+    def note_command_timeout(self) -> None:
+        """A command of yours got no answer: give the projector a rest too.
+
+        Entities keep their last state (polls during the pause don't fail).
+        """
+        self._start_quiet(None)
+
+    def end_quiet(self) -> None:
+        """The projector answered a command: resume polling right away."""
+        if self._quiet_until:
+            self._quiet_until = 0.0
+            self._quiet_error = None
+
+    @property
+    def quiet(self) -> bool:
+        """Return True while polling is paused for recovery."""
+        return monotonic() < self._quiet_until
+
+    def _ordered_queries(self) -> list[Query]:
+        """Queries for this model; ones that keep failing go last.
+
+        A query that gets no answer ends the poll, so a command the projector
+        doesn't support must not keep the ones after it from being read.
+        """
+        queries = self.queries()
+        return sorted(
+            queries,
+            key=lambda q: self._failures.get(q.key, 0) >= UNSUPPORTED_AFTER,
+        )
 
     def queries(self) -> tuple[Query, ...]:
         """Return the optional queries this model supports (projector on)."""
@@ -219,13 +294,17 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if device and device.sw_version != version:
             registry.async_update_device(device.id, sw_version=version)
 
-    async def _query(self, result: dict[str, Any], query: Query) -> None:
-        """Run one optional query; a failure skips just that value."""
+    async def _query(self, result: dict[str, Any], query: Query) -> bool:
+        """Run one optional query; a failure skips just that value.
+
+        Returns False if the projector didn't answer in time.
+        """
         try:
             value = await self.device.poll_ref(query.code)
         except JvcProjectorConnectError:
             raise
         except JvcProjectorError as err:
+            answered = not isinstance(err, JvcProjectorTimeoutError)
             count = self._failures.get(query.key, 0) + 1
             self._failures[query.key] = count
             # Warn once per key until it works again; the rest goes to debug.
@@ -241,21 +320,22 @@ class JvcProjectorDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             else:
                 _LOGGER.debug("%s (%s) failed: %s", query.key, query.code, err)
-            return
+            return answered
 
         if self._failures.pop(query.key, None) and query.key in self._warned:
             self._warned.discard(query.key)
             _LOGGER.info("%s (%s) is answering again", query.key, query.code)
 
         if value is None or value == "":
-            return
+            return True
         if query.numeric:
             try:
                 result[query.key] = int(value)
             except ValueError:
                 _LOGGER.debug("%s not numeric: %r", query.key, value)
-            return
+            return True
         result[query.key] = value
+        return True
 
     def set_optimistic(self, **values: Any) -> None:
         """Show a value the user just set, until the next poll confirms it."""

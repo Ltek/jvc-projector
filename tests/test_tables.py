@@ -193,3 +193,23 @@ def test_eshift_follows_pyjvcprojector_per_model():
         "B2A3": False,  # NX5
     }.items():
         assert supports(f"ILAFPJ -- {code}", "PMUS") is expected, code
+
+
+def test_timing_defaults_and_clamping():
+    from custom_components.jvc_projector_ha.options import Timing
+
+    t = Timing.from_options(None)
+    assert (t.poll_interval, t.response_timeout, t.change_timeout) == (10, 5, 10)
+    assert (t.lens_timeout, t.recovery_pause) == (30, 30)
+    t = Timing.from_options(
+        {"poll_interval": 1, "lens_timeout": 999, "change_timeout": "x"}
+    )
+    assert (t.poll_interval, t.lens_timeout, t.change_timeout) == (5, 120, 10)
+
+
+def test_options_translations():
+    from custom_components.jvc_projector_ha.options import LIMITS
+
+    step = EN["options"]["step"]["init"]
+    for key in LIMITS:
+        assert step["data"][key] and step["data_description"][key], key
